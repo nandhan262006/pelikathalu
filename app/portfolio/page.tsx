@@ -1,47 +1,36 @@
 import Link from "next/link";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { Arrow, WhatsApp } from "@/components/Icons";
+import { Arrow } from "@/components/Icons";
 import PortfolioGallery from "@/components/PortfolioGallery";
+import SiteHeader from "@/components/SiteHeader";
+import PaletteVars from "@/components/PaletteVars";
+import { getSiteContent } from "@/lib/sites";
 
 const WHATSAPP_URL = "https://wa.me/";
 const INSTAGRAM_URL = "https://www.instagram.com/portraits.by_pellikathalu/";
 
-// Everything in /public/images except decorative UI assets.
-// Newest shoots sort first; curated recent-* highlights stay on top.
+// Curated archive: only dated shoot batches. UI assets (hero, categories,
+// book-shoot, recent-*) stay on the homepage, not in the archive.
 function getPhotos(): string[] {
   const dir = join(process.cwd(), "public", "images");
   const files = readdirSync(dir).filter((f) => /\.(jpe?g|webp|png)$/i.test(f));
-  const decorative = /^(leaf-|greentexture)/i;
-  const photos = files.filter((f) => !decorative.test(f));
-  const highlights = photos.filter((f) => /^recent-/i.test(f)).sort();
-  const rest = photos.filter((f) => !/^recent-/i.test(f)).sort().reverse();
-  return [...highlights, ...rest].map((f) => `/images/${f}`);
+  const isShoot = /^\d{4}-\d{2}-\d{2}_/i;
+  const photos = files.filter((f) => isShoot.test(f));
+  return photos.sort().reverse().map((f) => `/images/${f}`);
 }
 
 const photos = getPhotos();
 
-export default function PortfolioPage() {
+export const dynamic = "force-dynamic";
+
+export default async function PortfolioPage() {
+  const content = await getSiteContent("home", false);
   return (
     <div className="shell">
+      <PaletteVars id={content?.theme?.paletteId} />
       <main className="page">
-        <header className="header">
-          <Link href="/" className="logo" aria-label="Portraits by Pelli Kathalu">
-            <span className="logo-by">Portraits by</span>
-            <span className="logo-name">Pelli Kathalu</span>
-            <span className="logo-sub">PREM &amp; PAVAN</span>
-          </Link>
-          <nav className="desktop-nav" aria-label="Primary">
-            <Link href="/">Home</Link>
-            <Link href="/portfolio">Portfolio</Link>
-            <Link href="/#reviews">Reviews</Link>
-            <Link href="/#story">Our Story</Link>
-          </nav>
-          <a className="book-btn" href={WHATSAPP_URL} target="_blank" rel="noreferrer">
-            <WhatsApp className="book-ico" />
-            Book a Shoot
-          </a>
-        </header>
+        <SiteHeader whatsapp={WHATSAPP_URL} solid />
 
         <section className="portfolio">
           <div className="portfolio-head">
@@ -49,7 +38,7 @@ export default function PortfolioPage() {
               <p className="script recent-script">Full frames</p>
               <h1 className="recent-title">Portfolio</h1>
               <p className="portfolio-sub">
-                {photos.length} photos — every image shown whole, nothing cropped.
+                {photos.length} selected frames — every image shown whole, nothing cropped.
               </p>
             </div>
             <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="view-all">
@@ -72,10 +61,9 @@ export default function PortfolioPage() {
         <footer className="site-footer green-texture">
           <div className="foot-top">
             <div className="foot-brand">
-              <div className="logo" aria-label="Portraits by Pelli Kathalu">
-                <span className="logo-by">Portraits by</span>
+              <div className="logo" aria-label="Pelli Kathalu by Prem and Pavan">
                 <span className="logo-name">Pelli Kathalu</span>
-                <span className="logo-sub">PREM &amp; PAVAN</span>
+                <span className="logo-sub">BY PREM &amp; PAVAN</span>
               </div>
               <p className="foot-tag">Captured the way they feel.</p>
             </div>

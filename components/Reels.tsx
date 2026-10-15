@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from "react";
 import { Arrow } from "@/components/Icons";
 
-export type Reel = { src: string; poster: string; label: string };
+export type Reel = { src: string; poster?: string; label: string; rotate?: boolean; spot?: string; x?: number; y?: number; w?: number; h?: number };
+
+type ReelPos = { x: number; y: number; w: number; h: number };
+type Corner = "nw" | "ne" | "sw" | "se";
+const r1 = (v: number) => Math.round(v * 10) / 10;
+const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
 
 const SpeakerOff = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -19,7 +24,19 @@ const SpeakerOn = () => (
   </svg>
 );
 
-export default function Reels({ reels }: { reels: Reel[] }) {
+export default function Reels({
+  reels,
+  edit = false,
+  onMove,
+  onSnapshot,
+  canvasH,
+}: {
+  reels: Reel[];
+  edit?: boolean;
+  onMove?: (i: number, pos: ReelPos) => void;
+  onSnapshot?: (items: ({ i: number } & ReelPos)[], boxH: number) => void;
+  canvasH?: number;
+}) {
   const [unmuted, setUnmuted] = useState<number | null>(null);
   // Tall (9:16) until metadata proves otherwise — tiles adapt per video.
   const [tall, setTall] = useState<boolean[]>(() => reels.map(() => true));
@@ -30,7 +47,97 @@ export default function Reels({ reels }: { reels: Reel[] }) {
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTap = useRef(0);
 
+  // --- Arrange mode: free drag + non-uniform corner resize inside the theater box ---
+  const gridRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ i: number; mode: "move" | "size"; corner: Corner; sx: number; sy: number; box: DOMRect; orig: ReelPos } | null>(null);
+  const [live, setLive] = useState<({ i: number } & ReelPos) | null>(null);
+  const dragged = useRef(false);
+
+  const startDrag = (i: number, e: RPointerEvent<HTMLElement>, mode: "move" | "size", corner: Corner = "se") => {
+    if (!edit || full !== null) return;
+    const box = gridRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const el = (e.currentTarget.closest(".reel") as HTMLElement | null)?.getBoundingClientRect() ?? e.currentTarget.getBoundingClientRect();
+    const r = reels[i];
+    const orig: ReelPos =
+      r.x != null && r.y != null && r.w != null && r.h != null
+        ? { x: r.x, y: r.y, w: r.w, h: r.h }
+        : {
+            x: ((el.left - box.left) / box.width) * 100,
+            y: ((el.top - box.top) / box.height) * 100,
+            w: (el.width / box.width) * 100,
+            h: (el.height / box.height) * 100,
+          };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { i, mode, corner, sx: e.clientX, sy: e.clientY, box, orig };
+    setLive({ i, ...orig });
+    dragged.current = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onDragMove = (e: RPointerEvent<HTMLElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    const dx = ((e.clientX - d.sx) / d.box.width) * 100;
+    const dy = ((e.clientY - d.sy) / d.box.height) * 100;
+    if (Math.abs(dx) + Math.abs(dy) > 0.5) dragged.current = true;
+    if (d.mode === "move") {
+      setLive({ i: d.i, x: r1(d.orig.x + dx), y: r1(d.orig.y + dy), w: r1(d.orig.w), h: r1(d.orig.h) });
+      return;
+    }
+    // Non-uniform resize: width and height follow the pointer independently.
+    const right = d.corner === "ne" || d.corner === "se";
+    const bottom = d.corner === "se" || d.corner === "sw";
+    const w = r1(Math.max(6, right ? d.orig.w + dx : d.orig.w - dx));
+    const h = r1(Math.max(6, bottom ? d.orig.h + dy : d.orig.h - dy));
+    const x = r1(right ? d.orig.x : d.orig.x + (d.orig.w - w));
+    const y = r1(bottom ? d.orig.y : d.orig.y + (d.orig.h - h));
+    setLive({ i: d.i, x, y, w, h });
+  };
+
+  const endDrag = (e: RPointerEvent<HTMLElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer capture may already be released */
+    }
+    if (live && dragged.current) onMove?.(live.i, { x: live.x, y: live.y, w: live.w, h: live.h });
+    setLive(null);
+  };
+
+  // Entering arrange mode: convert every reel from grid slot to absolute coords in one shot.
+  useEffect(() => {
+    if (!edit || !onSnapshot) return;
+    const t = setTimeout(() => {
+      const box = gridRef.current?.getBoundingClientRect();
+      if (!box || box.width === 0 || box.height === 0) return;
+      const els = Array.from(gridRef.current?.querySelectorAll(".reel") ?? []) as HTMLElement[];
+      const items = reels
+        .map((_, i) => {
+          const el = els[i];
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return {
+            i,
+            x: r1(((b.left - box.left) / box.width) * 100),
+            y: r1(((b.top - box.top) / box.height) * 100),
+            w: r1((b.width / box.width) * 100),
+            h: r1((b.height / box.height) * 100),
+          };
+        })
+        .filter((v): v is { i: number } & ReelPos => v !== null);
+      onSnapshot(items, Math.round(box.height));
+    }, 80);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit]);
+
   const syncOrientation = (i: number, v: HTMLVideoElement) => {
+    if (reels[i]?.rotate) return;
     if (v.videoWidth > 0) {
       const isTall = v.videoHeight >= v.videoWidth;
       setTall((t) => (t[i] === isTall ? t : t.map((x, j) => (j === i ? isTall : x))));
@@ -94,6 +201,7 @@ export default function Reels({ reels }: { reels: Reel[] }) {
 
   // Single tap = mute toggle, double tap = fullscreen.
   const onTap = (i: number) => {
+    if (edit || dragged.current) return;
     const now = Date.now();
     if (now - lastTap.current < 300) {
       openFull(i);
@@ -132,48 +240,73 @@ export default function Reels({ reels }: { reels: Reel[] }) {
 
   return (
     <>
-      <div className="reels-grid">
-        {reels.map((r, i) => (
-          <figure
-            key={r.src}
-            className={`reel ${tall[i] ? "reel-v" : "reel-h"}`}
-            onClick={() => onTap(i)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                toggle(i);
-              }
-            }}
-            tabIndex={0}
-            role="button"
-            aria-label={`${r.label} reel ${i + 1} — tap for sound, double-tap for fullscreen`}
-          >
-            <video
-              ref={(el) => {
-                vids.current[i] = el;
-                if (el) {
-                  el.defaultMuted = true;
-                  el.muted = unmuted !== i;
-                  // Metadata may already be loaded before hydration — sync now.
-                  if (el.readyState >= 1) syncOrientation(i, el);
+      <div
+        className={`reels-grid${edit ? " editing" : ""}${canvasH ? " placed" : ""}`}
+        ref={gridRef}
+        style={canvasH ? ({ ["--theater-h" as string]: `${canvasH}px` } as CSSProperties) : undefined}
+      >
+        {reels.map((r, i) => {
+          const pos = live && live.i === i ? live : r.x != null && r.y != null && r.w != null && r.h != null ? r : null;
+          return (
+            <figure
+              key={r.src}
+              className={`reel ${tall[i] ? "reel-v" : "reel-h"}${r.rotate ? " reel-rot" : ""}${r.spot ? ` ${r.spot}` : ""}${pos ? " reel-placed" : ""}`}
+              style={pos ? { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` } : undefined}
+              onClick={() => onTap(i)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggle(i);
                 }
               }}
-              src={r.src}
-              poster={r.poster}
-              muted
-              loop
-              playsInline
-              autoPlay
-              preload="metadata"
-              disablePictureInPicture
-              onLoadedMetadata={(e) => syncOrientation(i, e.currentTarget)}
-            />
-            <span className="reel-tag">{r.label}</span>
-            <span className={`reel-badge ${unmuted === i ? "on" : ""}`} aria-hidden>
-              {unmuted === i ? <SpeakerOn /> : <SpeakerOff />}
-            </span>
-          </figure>
-        ))}
+              onPointerDown={edit ? (e) => startDrag(i, e, "move") : undefined}
+              onPointerMove={edit ? onDragMove : undefined}
+              onPointerUp={edit ? endDrag : undefined}
+              onPointerCancel={edit ? endDrag : undefined}
+              tabIndex={0}
+              role="button"
+              aria-label={edit ? `${r.label} reel ${i + 1} — drag to move` : `${r.label} reel ${i + 1} — tap for sound, double-tap for fullscreen`}
+            >
+              <video
+                ref={(el) => {
+                  vids.current[i] = el;
+                  if (el) {
+                    el.defaultMuted = true;
+                    el.muted = unmuted !== i;
+                    // Metadata may already be loaded before hydration — sync now.
+                    if (el.readyState >= 1) syncOrientation(i, el);
+                  }
+                }}
+                src={r.src}
+                poster={r.poster}
+                muted
+                loop
+                playsInline
+                autoPlay
+                preload="metadata"
+                disablePictureInPicture
+                onLoadedMetadata={(e) => syncOrientation(i, e.currentTarget)}
+              />
+              <span className="reel-tag">{r.label}</span>
+              <span className={`reel-badge ${unmuted === i ? "on" : ""}`} aria-hidden>
+                {unmuted === i ? <SpeakerOn /> : <SpeakerOff />}
+              </span>
+              {edit &&
+                CORNERS.map((c) => (
+                  <span
+                    key={c}
+                    className={`reel-grip grip-${c}`}
+                    aria-hidden
+                    onPointerDown={(e) => startDrag(i, e, "size", c)}
+                    onPointerMove={onDragMove}
+                    onPointerUp={endDrag}
+                    onPointerCancel={endDrag}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ))}
+            </figure>
+          );
+        })}
       </div>
 
       {full !== null && (
@@ -214,7 +347,7 @@ export default function Reels({ reels }: { reels: Reel[] }) {
               playsInline
               autoPlay
               preload="auto"
-              className="lb-video"
+              className={`lb-video${reels[full].rotate ? " lb-video-rot" : ""}`}
             />
             <span className={`reel-badge lb-vbadge ${!fullMuted ? "on" : ""}`} aria-hidden>
               {!fullMuted ? <SpeakerOn /> : <SpeakerOff />}
