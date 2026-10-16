@@ -725,3 +725,495 @@
   border-color: var(--db-accent);
   color: #fff;
 }
+
+/* ---- Gallery popup editor ---- */
+.db-album-thumb {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--db-line);
+  flex: none;
+}
+.db-btn-active {
+  background: var(--db-ink);
+  border-color: var(--db-ink);
+  color: #fff;
+}
+.db-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(20, 28, 18, 0.6);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: dbModalIn 0.18s ease;
+}
+@keyframes dbModalIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.db-modal {
+  width: min(860px, 100%);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  animation: dbModalUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes dbModalUp {
+  from { opacity: 0; transform: translateY(18px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+.db-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--db-line);
+  background: #fbfaf6;
+}
+.db-modal-title {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+.db-modal-title strong {
+  display: block;
+  font-size: 16px;
+}
+.db-modal-cover {
+  width: 56px;
+  height: 70px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--db-line);
+  flex: none;
+}
+.db-modal-sub {
+  display: block;
+  font-size: 12px;
+  color: var(--db-dim);
+  margin-top: 3px;
+}
+.db-modal-sub a {
+  color: var(--db-accent);
+  font-weight: 600;
+}
+.db-modal-close {
+  border: 1px solid var(--db-line);
+  background: #fff;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--db-ink);
+  flex: none;
+}
+.db-modal-close:hover {
+  background: #f1efe4;
+}
+.db-modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+}
+.db-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.db-modal-grid {
+  max-height: 440px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.db-modal-grid .db-album-photo img {
+  cursor: zoom-in;
+}
+/* Fit = show complete image, no crop (default). Fill = old cover-crop look. */
+.db-modal-grid.db-fit .db-album-photo {
+  background: #f4f2ea;
+}
+.db-modal-grid.db-fit .db-album-photo img {
+  width: 100%;
+  height: 200px;
+  aspect-ratio: auto;
+  object-fit: contain;
+  background: #f4f2ea;
+}
+.db-modal-grid.db-fill .db-album-photo img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}
+.db-photo-num {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(20, 28, 18, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Full-size photo preview inside the popup editor */
+.db-photo-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(12, 18, 11, 0.94);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: dbModalIn 0.15s ease;
+}
+.db-photo-preview img {
+  max-width: 92vw;
+  max-height: 86vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  cursor: default;
+}
+.db-photo-preview-close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+.db-photo-preview-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.db-photo-preview-count {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 6px 16px;
+  border-radius: 999px;
+}
+.db-photo-preview-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 64px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.db-photo-preview-nav:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.db-photo-preview-prev { left: 14px; }
+.db-photo-preview-next { right: 14px; }
+.db-photo-preview-hint {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+}
+.db-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--db-line);
+  background: #fbfaf6;
+}
+@media (max-width: 640px) {
+  .db-modal-overlay {
+    padding: 10px;
+  }
+  .db-modal {
+    max-height: 94vh;
+    border-radius: 12px;
+  }
+}
+
+/* Full-screen photo popup (admin lightbox) — rendered via portal above everything */
+.db-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(10, 15, 9, 0.96);
+  display: flex;
+  flex-direction: column;
+  cursor: zoom-out;
+  animation: dbModalIn 0.16s ease;
+}
+.db-lightbox-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: default;
+  flex: none;
+}
+.db-lightbox-count {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 6px 16px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.db-lightbox-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.db-lightbox-tools .db-btn {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.db-lightbox-tools .db-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.db-lightbox-tools .db-btn-active {
+  background: rgba(255, 255, 255, 0.28);
+  border-color: #fff;
+}
+.db-lightbox-close {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+.db-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.db-lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 52px;
+  height: 72px;
+  border-radius: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 34px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.db-lightbox-nav:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.db-lightbox-prev { left: 14px; }
+.db-lightbox-next { right: 14px; }
+.db-lightbox-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 84px;
+  margin: 0;
+  cursor: default;
+  overflow: auto;
+}
+.db-lightbox-img {
+  max-width: 100%;
+  max-height: calc(100vh - 240px);
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+  cursor: zoom-in;
+  background: #111;
+}
+.db-lightbox-img.db-lightbox-zoom {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  min-width: min(100%, 1200px);
+  cursor: zoom-out;
+  transform: scale(1);
+}
+.db-lightbox-loading {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  animation: dbSpin 0.8s linear infinite;
+}
+@keyframes dbSpin {
+  to { transform: rotate(360deg); }
+}
+.db-lightbox-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+}
+.db-lightbox-strip {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 12px 16px 16px;
+  cursor: default;
+  scrollbar-width: thin;
+}
+.db-lightbox-thumb {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background: #222;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.db-lightbox-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.db-lightbox-thumb-on {
+  border-color: #fff;
+  opacity: 1;
+}
+@media (max-width: 640px) {
+  .db-lightbox-stage {
+    padding: 0 8px;
+  }
+  .db-lightbox-nav {
+    width: 42px;
+    height: 58px;
+    font-size: 26px;
+  }
+  .db-lightbox-prev { left: 6px; }
+  .db-lightbox-next { right: 6px; }
+  .db-lightbox-bar {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- Folder / file drag & drop ---- */
+.db-dropzone {
+  border: 1.5px dashed #b9bfa5;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--db-dim);
+  background: #fbfaf6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.db-dropzone-on {
+  border-color: var(--db-accent);
+  background: #f0f4e8;
+  color: var(--db-ink);
+}
+.db-sec.db-drop-active .db-dropzone {
+  border-color: var(--db-accent);
+  background: #eef3e4;
+}
+.db-modal.db-drop-active {
+  outline: 2px dashed var(--db-accent);
+  outline-offset: -2px;
+}
+.db-drop-overlay {
+  border: 2px dashed var(--db-accent);
+  border-radius: 12px;
+  background: rgba(46, 74, 42, 0.07);
+  padding: 26px 16px;
+  display: grid;
+  gap: 6px;
+  place-items: center;
+  text-align: center;
+}
+.db-drop-overlay strong {
+  font-size: 15px;
+  color: var(--db-ink);
+}
+.db-drop-overlay span {
+  font-size: 12.5px;
+  color: var(--db-dim);
+}
+.db-progress {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  border: 1px solid var(--db-line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #f4f2ea;
+  font-size: 12px;
+  font-weight: 600;
+}
+.db-progress i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(90deg, #2e4a2a, #5a7a52);
+  transition: width 0.2s ease;
+}
+.db-progress em {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto;
+  font-style: normal;
+  color: var(--db-ink);
+  mix-blend-mode: normal;
+}

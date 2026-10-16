@@ -30,13 +30,13 @@ export default function SiteHeader({
           <button className="menu-close" aria-label="Close menu" onClick={() => setMenu(false)}>
             ✕
           </button>
-          <a href="/#films" onClick={() => setMenu(false)}>New-age Films</a>
-          <a href="/#podcast" onClick={() => setMenu(false)}>Podcast</a>
-          <a href="/#duo" onClick={() => setMenu(false)}>About Us</a>
-          <a href="/#romance" onClick={() => setMenu(false)}>Modern Romance</a>
-          <a href="/#documentary" onClick={() => setMenu(false)}>Documentary</a>
-          <a href="/#weddings" onClick={() => setMenu(false)}>Weddings</a>
+          <a href="/" onClick={() => setMenu(false)}>Home</a>
+          <a href="/portraits" onClick={() => setMenu(false)}>Portraits</a>
+          <a href="/weddings" onClick={() => setMenu(false)}>Weddings</a>
           <a href="/portfolio" onClick={() => setMenu(false)}>Gallery</a>
+          <a href="/#films" onClick={() => setMenu(false)}>New-age Films</a>
+          <a href="/#duo" onClick={() => setMenu(false)}>About Us</a>
+          <a href="/#reviews" onClick={() => setMenu(false)}>Reviews</a>
         </div>
       )}
     </>

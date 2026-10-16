@@ -1,5 +1,7 @@
 import { getDb } from "./db";
 
+export type AlbumCategory = "wedding" | "portrait";
+
 export type AlbumRow = {
   id: number;
   slug: string;
@@ -9,6 +11,8 @@ export type AlbumRow = {
   count: number;
   cover: string | null; // effective cover: custom cover_url, else first photo
   coverUrl: string | null; // raw admin-chosen cover
+  category: AlbumCategory;
+  featured: boolean;
 };
 
 export type PhotoRow = { id: number; url: string; caption: string | null; sort: number };
@@ -22,28 +26,54 @@ export function slugify(input: string): string {
     .slice(0, 60);
 }
 
-export async function listAlbums(): Promise<AlbumRow[]> {
+export async function listAlbums(filter?: {
+  category?: AlbumCategory;
+  featuredOnly?: boolean;
+  hideEmpty?: boolean;
+}): Promise<AlbumRow[]> {
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (filter?.category) {
+    where.push("a.category = ?");
+    args.push(filter.category);
+  }
+  if (filter?.featuredOnly) {
+    where.push("a.featured = 1");
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const r = await getDb().execute(
     `SELECT a.id, a.slug, a.title, a.couple, a.description,
+            COALESCE(a.category, 'wedding') AS category,
+            COALESCE(a.featured, 0) AS featured,
             (SELECT COUNT(*) FROM photos p WHERE p.album_id = a.id) AS count,
             a.cover_url,
             COALESCE(a.cover_url, (SELECT p.url FROM photos p WHERE p.album_id = a.id ORDER BY p.sort, p.id LIMIT 1)) AS cover
-     FROM albums a ORDER BY a.id`
+     FROM albums a ${whereSql} ORDER BY a.featured DESC, a.id DESC`,
+    args as never[]
   );
-  return r.rows.map((x) => ({
-    id: Number(x.id),
-    slug: String(x.slug),
-    title: String(x.title),
-    couple: x.couple == null ? null : String(x.couple),
-    description: x.description == null ? null : String(x.description),
-    count: Number(x.count),
-    cover: x.cover == null ? null : String(x.cover),
-    coverUrl: x.cover_url == null ? null : String(x.cover_url),
-  }));
+  return r.rows
+    .map((x) => ({
+      id: Number(x.id),
+      slug: String(x.slug),
+      title: String(x.title),
+      couple: x.couple == null ? null : String(x.couple),
+      description: x.description == null ? null : String(x.description),
+      count: Number(x.count),
+      cover: x.cover == null ? null : String(x.cover),
+      coverUrl: x.cover_url == null ? null : String(x.cover_url),
+      category: (x.category === "portrait" ? "portrait" : "wedding") as AlbumCategory,
+      featured: Number(x.featured) === 1,
+    }))
+    // Empty (0-photo) albums are drafts/tests — never show them publicly.
+    .filter((a) => !filter?.hideEmpty || a.count > 0);
 }
 
-export async function getAlbumBySlug(slug: string): Promise<AlbumRow | null> {
-  const all = await listAlbums();
+export async function listFeatured(category?: AlbumCategory): Promise<AlbumRow[]> {
+  return listAlbums({ category, featuredOnly: true });
+}
+
+export async function getAlbumBySlug(slug: string, category?: AlbumCategory): Promise<AlbumRow | null> {
+  const all = await listAlbums(category ? { category } : undefined);
   return all.find((a) => a.slug === slug) ?? null;
 }
 
@@ -52,31 +82,49 @@ export async function createAlbum(input: {
   title: string;
   couple?: string;
   description?: string;
+  category?: AlbumCategory;
+  featured?: boolean;
 }): Promise<AlbumRow | { error: string }> {
   const db = getDb();
   const exists = await db.execute({ sql: "SELECT id FROM albums WHERE slug = ?", args: [input.slug] });
   if (exists.rows.length > 0) return { error: "slug already exists" };
   await db.execute({
-    sql: "INSERT INTO albums (slug, title, couple, description) VALUES (?, ?, ?, ?)",
-    args: [input.slug, input.title, input.couple ?? null, input.description ?? null],
+    sql: "INSERT INTO albums (slug, title, couple, description, category, featured) VALUES (?, ?, ?, ?, ?, ?)",
+    args: [
+      input.slug,
+      input.title,
+      input.couple ?? null,
+      input.description ?? null,
+      input.category ?? "wedding",
+      input.featured ? 1 : 0,
+    ],
   });
   return (await getAlbumBySlug(input.slug))!;
 }
 
 export async function updateAlbum(
   slug: string,
-  patch: { title?: string; couple?: string; description?: string; cover?: string | null }
+  patch: {
+    title?: string;
+    couple?: string;
+    description?: string;
+    cover?: string | null;
+    category?: AlbumCategory;
+    featured?: boolean;
+  }
 ): Promise<boolean> {
   const db = getDb();
   const album = await getAlbumBySlug(slug);
   if (!album) return false;
   await db.execute({
-    sql: "UPDATE albums SET title = ?, couple = ?, description = ?, cover_url = ? WHERE id = ?",
+    sql: "UPDATE albums SET title = ?, couple = ?, description = ?, cover_url = ?, category = ?, featured = ? WHERE id = ?",
     args: [
       patch.title ?? album.title,
       patch.couple ?? album.couple,
       patch.description ?? album.description,
       patch.cover === undefined ? album.coverUrl : patch.cover,
+      patch.category ?? album.category,
+      patch.featured === undefined ? (album.featured ? 1 : 0) : patch.featured ? 1 : 0,
       album.id,
     ],
   });

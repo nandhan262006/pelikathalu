@@ -21,11 +21,33 @@ export async function PUT(req: Request, { params }: { params: Promise<{ slug: st
     couple?: string;
     description?: string;
     cover?: string | null;
+    category?: string;
+    featured?: boolean;
   } | null;
-  if (!body || (!body.title && !body.couple && body.description === undefined && body.cover === undefined)) {
+  if (
+    !body ||
+    (!body.title &&
+      !body.couple &&
+      body.description === undefined &&
+      body.cover === undefined &&
+      body.category === undefined &&
+      body.featured === undefined)
+  ) {
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   }
-  const ok = await updateAlbum(slug, body);
+  const patch: { title?: string; couple?: string; description?: string; cover?: string | null; category?: "wedding" | "portrait"; featured?: boolean } = {
+    title: body.title,
+    couple: body.couple,
+    description: body.description,
+    cover: body.cover,
+    featured: body.featured,
+  };
+  if (body.category !== undefined) {
+    if (body.category !== "wedding" && body.category !== "portrait")
+      return NextResponse.json({ error: "bad category" }, { status: 400 });
+    patch.category = body.category;
+  }
+  const ok = await updateAlbum(slug, patch);
   if (!ok) return NextResponse.json({ error: "album not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

@@ -11,8 +11,9 @@ export async function uploadToR2(file: File): Promise<string> {
     body: JSON.stringify({ contentType: file.type, filename: file.name }),
   });
   if (!metaRes.ok) throw new Error(`upload-url ${metaRes.status}`);
-  const meta = (await metaRes.json()) as { uploadUrl: string; publicUrl: string };
-  const put = await fetch(meta.uploadUrl, { method: "PUT", headers: { "content-type": file.type }, body: file });
+  const meta = (await metaRes.json()) as { uploadUrl: string; publicUrl: string; contentType?: string };
+  const putType = meta.contentType || file.type || "application/octet-stream";
+  const put = await fetch(meta.uploadUrl, { method: "PUT", headers: { "content-type": putType }, body: file });
   if (!put.ok) throw new Error(`upload ${put.status}`);
   return meta.publicUrl;
 }

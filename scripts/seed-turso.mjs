@@ -21,6 +21,8 @@ await db.batch(
         couple TEXT,
         description TEXT,
         cover_url TEXT,
+        category TEXT DEFAULT 'wedding',
+        featured INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
       )`,
     },

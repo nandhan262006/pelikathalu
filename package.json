@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:fresh": "rm -rf .next && next dev",
+    "clean": "rm -rf .next",
+    "prebuild": "rm -rf .next",
     "build": "next build",
     "start": "next start"
   },

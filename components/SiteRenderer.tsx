@@ -13,9 +13,18 @@ const MENU_HREFS: Record<string, string> = {
   "The Little Things": "#little-things",
   "Modern Romance": "#romance",
   Documentary: "#documentary",
-  Portraits: "#portraits",
-  Weddings: "#weddings",
+  Portraits: "/portraits",
+  Weddings: "/weddings",
   Gallery: "/portfolio",
+};
+
+type AlbumCard = {
+  slug: string;
+  title: string;
+  count: number;
+  cover: string | null;
+  category?: string;
+  featured?: boolean;
 };
 
 export default function SiteRenderer({
@@ -29,7 +38,10 @@ export default function SiteRenderer({
   const [slide, setSlide] = useState(0);
   const [review, setReview] = useState(0);
   const [menu, setMenu] = useState(false);
-  const [albums, setAlbums] = useState<{ slug: string; title: string; count: number; cover: string | null }[]>([]);
+  const [albums, setAlbums] = useState<AlbumCard[]>([]);
+  const [portraitAlbums, setPortraitAlbums] = useState<AlbumCard[]>([]);
+  const [featured, setFeatured] = useState<AlbumCard[]>([]);
+  const [featuredPortraits, setFeaturedPortraits] = useState<AlbumCard[]>([]);
 
   useEffect(() => setC(serverContent), [serverContent]);
 
@@ -70,10 +82,22 @@ export default function SiteRenderer({
   );
 
   useEffect(() => {
-    fetch("/api/albums")
+    fetch("/api/albums?category=wedding&nonempty=1")
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((d) => setAlbums(d.albums))
       .catch(() => setAlbums([]));
+    fetch("/api/albums?category=portrait&nonempty=1")
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => setPortraitAlbums(d.albums))
+      .catch(() => setPortraitAlbums([]));
+    fetch("/api/albums?featured=1&nonempty=1")
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => setFeatured(d.albums))
+      .catch(() => setFeatured([]));
+    fetch("/api/albums?category=portrait&featured=1&nonempty=1")
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => setFeaturedPortraits(d.albums))
+      .catch(() => setFeaturedPortraits([]));
   }, []);
 
   useEffect(() => {
@@ -95,7 +119,7 @@ export default function SiteRenderer({
     );
     els.forEach((el) => io.observe(el));
     return () => io.disconnect();
-  }, [c, albums]);
+  }, [c, albums, portraitAlbums, featured, featuredPortraits]);
 
   const r = c.reviews[review % c.reviews.length];
   const move = (d: number) => setReview((i) => (i + d + c.reviews.length) % c.reviews.length);
@@ -109,13 +133,6 @@ export default function SiteRenderer({
           <button className="menu-btn" aria-label="Open menu" onClick={() => setMenu(true)}>
             <Menu className="menu-ico" />
           </button>
-          <nav className="desktop-nav" aria-label="Primary">
-            <a href="#duo">About</a>
-            <a href="#our-story" className="nav-extra">Our Story</a>
-            <a href="#films">Films</a>
-            <a href="#portraits" className="nav-extra">Portraits</a>
-            <a href="/portfolio">Gallery</a>
-          </nav>
           <a href="#" className="logo" aria-label={c.branding.ariaName}>
             <span className="logo-name">{c.branding.logoName}</span>
             <span className="logo-sub">{c.branding.logoSub}</span>
@@ -309,9 +326,21 @@ export default function SiteRenderer({
             <p className="v-portraits-proof" data-reveal style={{ transitionDelay: "220ms" }}>
               {c.portraits.proof}
             </p>
-            <a href="/portfolio" className="v-underline-cta v-cta-inv" data-reveal style={{ transitionDelay: "280ms" }}>
-              {c.portraits.cta}
-            </a>
+            {(featuredPortraits.length > 0 ? featuredPortraits : portraitAlbums).length > 0 && (
+              <div className="v-tease-scroll" data-reveal style={{ transitionDelay: "240ms" }}>
+                {(featuredPortraits.length > 0 ? featuredPortraits : portraitAlbums).slice(0, 6).map((a) => (
+                  <a key={a.slug} href={`/portraits/${a.slug}`} className="v-tease-card">
+                    <div className="v-tease-img" style={a.cover ? { backgroundImage: `url("${a.cover}")` } : undefined} />
+                    <h3 className="v-names">{a.title}</h3>
+                  </a>
+                ))}
+              </div>
+            )}
+            <div data-reveal style={{ transitionDelay: "280ms" }}>
+              <a href="/portraits" className="v-underline-cta v-cta-inv">
+                {c.portraits.cta}
+              </a>
+            </div>
           </div>
         </section>
 
@@ -327,6 +356,8 @@ export default function SiteRenderer({
               </a>
             ))}
           </div>
+          <a href="/weddings" className="v-underline-cta">View all weddings</a>
+          <br />
           <a href="#films" className="v-underline-cta">Enter Pelli Kathalu Theater</a>
         </section>
 
@@ -346,17 +377,30 @@ export default function SiteRenderer({
           <p className="v-hand">{c.theater.hand}</p>
         </section>
 
-        {/* Gallery slideshow */}
+        {/* Gallery slideshow — featured WEDDING albums only (portraits live in their own section above) */}
         <section className="v-tease" id="work">
           <h2 className="v-big">{c.gallery.heading}</h2>
           <p className="v-small">{c.gallery.small}</p>
           <div className="v-tease-scroll">
-            {c.gallery.items.map((g) => (
-              <a key={g.names} href="/portfolio" className="v-tease-card">
-                <div className="v-tease-img" style={{ backgroundImage: `url("${g.img}")`, ...(g.imgCrop ? { backgroundPosition: g.imgCrop } : {}) }} />
-                <h3 className="v-names">{g.names}</h3>
-              </a>
-            ))}
+            {featured.filter((g) => g.category !== "portrait").length > 0
+              ? featured
+                  .filter((g) => g.category !== "portrait")
+                  .slice(0, 6)
+                  .map((g) => (
+                    <a key={g.slug} href={`/weddings/${g.slug}`} className="v-tease-card">
+                      <div
+                        className="v-tease-img"
+                        style={g.cover ? { backgroundImage: `url("${g.cover}")` } : undefined}
+                      />
+                      <h3 className="v-names">{g.title}</h3>
+                    </a>
+                  ))
+              : c.gallery.items.map((g) => (
+                  <a key={g.names} href="/portfolio" className="v-tease-card">
+                    <div className="v-tease-img" style={{ backgroundImage: `url("${g.img}")`, ...(g.imgCrop ? { backgroundPosition: g.imgCrop } : {}) }} />
+                    <h3 className="v-names">{g.names}</h3>
+                  </a>
+                ))}
           </div>
           <a href="/portfolio" className="v-underline-cta">{c.gallery.cta}</a>
         </section>
