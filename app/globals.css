@@ -815,7 +815,7 @@ section { box-sizing: border-box; }
   /* Cinematics & Reels */
   .cine { padding: 56px 48px 24px; }
   .cine-hint { font-size: 14px; margin-bottom: 6px; margin-right: 4px; }
-  .reels-grid { margin-top: 20px; column-gap: 0; gap: 0; columns: 4; }
+  .reels-grid { margin-top: 20px; column-gap: 0; gap: 0; }
   .reel { border-radius: 0; }
   .reel-tag { left: 12px; bottom: 12px; font-size: 12px; padding: 6px 14px; }
   .reel-badge { top: 12px; right: 12px; width: 42px; height: 42px; }
@@ -1389,7 +1389,11 @@ section { box-sizing: border-box; }
 }
 .theater-box .reels-grid { margin-top: 0; }
 /* Theater: vertical anchors on edges, 2x3 horizontal grid between (cols 2-3, verticals NOT counted) */
-.v-theater .reels-grid { position: relative; min-height: var(--theater-h, calc(420 * var(--u))); grid-template-columns: repeat(4, 1fr); grid-template-rows: auto auto auto; max-width: 1100px; margin-left: auto; margin-right: auto; align-items: start; column-gap: calc(8 * var(--u)); row-gap: 0; }
+.v-theater .reels-grid { position: relative; min-height: var(--theater-h, calc(420 * var(--u))); grid-template-columns: repeat(4, 1fr); grid-template-rows: auto auto auto; grid-auto-flow: dense; max-width: 1100px; margin-left: auto; margin-right: auto; align-items: start; column-gap: calc(8 * var(--u)); row-gap: 0; }
+/* Ratio canvas (preferred): composition scales like one image at any width. */
+.v-theater .reels-grid.placed-ratio { aspect-ratio: var(--theater-ratio); min-height: 0; }
+/* Unlocked counts (anything but the full 5-spot set) get breathing room between rows. */
+.v-theater .reels-grid:not(.reels-locked) { row-gap: calc(8 * var(--u)); }
 /* Free arrange mode: reels with stored x/y/w percentages detach from the grid */
 .reels-grid.editing .reel { cursor: grab; touch-action: none; outline: 2px dashed rgba(250,247,239,0.85); outline-offset: 2px; }
 .reels-grid.editing .reel:active { cursor: grabbing; }
@@ -1432,13 +1436,14 @@ section { box-sizing: border-box; }
 }
 /* Tiles follow each video's native resolution via .reel-v / .reel-h auto-detection */
 .v-theater .reel { max-height: none; }
-/* PERMANENT LOCKS — verticals: vt-1 (left top), vt-4 (right, spans full height). DO NOT MOVE. */
-.v-theater .reel-vt-1 { grid-column: 1; grid-row: 1; }
-.v-theater .reel-vt-2 { grid-column: 2; grid-row: 2; } /* middle 2x3: row 2 col 1 */
-.v-theater .reel-vt-4 { grid-column: 4; grid-row: 1 / span 3; }
+/* PERMANENT LOCKS — apply only with the full 5-spot set (.reels-locked); verticals:
+   vt-1 (left top), vt-4 (right, spans full height). DO NOT MOVE. */
+.v-theater .reels-grid.reels-locked .reel-vt-1 { grid-column: 1; grid-row: 1; }
+.v-theater .reels-grid.reels-locked .reel-vt-2 { grid-column: 2; grid-row: 2; } /* middle 2x3: row 2 col 1 */
+.v-theater .reels-grid.reels-locked .reel-vt-4 { grid-column: 4; grid-row: 1 / span 3; }
 /* Horizontals: middle 2x3 zone (cols 2-3 x rows 1-3). 16:9 rows stack inside vertical height. */
-.v-theater .reel-vt-w2 { grid-column: 2; grid-row: 1; }
-.v-theater .reel-vt-w1 { grid-column: 3; grid-row: 1; }
+.v-theater .reels-grid.reels-locked .reel-vt-w2 { grid-column: 2; grid-row: 1; }
+.v-theater .reels-grid.reels-locked .reel-vt-w1 { grid-column: 3; grid-row: 1; }
 /* Mobile theater: desktop spot-locks are a wide-screen art direction — phones get a
    2-up grid flowing in DOM order. This block MUST stay after the locks (same
    specificity, later wins). */
@@ -1447,17 +1452,24 @@ section { box-sizing: border-box; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: none;
     min-height: 0;
+    aspect-ratio: auto;
     column-gap: calc(8 * var(--u));
     row-gap: calc(8 * var(--u));
   }
-  .v-theater .reel-vt-1,
-  .v-theater .reel-vt-2,
-  .v-theater .reel-vt-4,
-  .v-theater .reel-vt-w1,
-  .v-theater .reel-vt-w2 {
+  .v-theater .reels-grid.reels-locked .reel-vt-1,
+  .v-theater .reels-grid.reels-locked .reel-vt-2,
+  .v-theater .reels-grid.reels-locked .reel-vt-4,
+  .v-theater .reels-grid.reels-locked .reel-vt-w1,
+  .v-theater .reels-grid.reels-locked .reel-vt-w2 {
     grid-column: auto;
     grid-row: auto;
   }
+}
+/* Tablet / small laptop (900–1200px): release the full-height span so the art
+   direction breathes in a narrower box; placed (arranged) reels scale on their own. */
+@media (min-width: 900px) and (max-width: 1200px) {
+  .v-theater .reels-grid { column-gap: calc(10 * var(--u)); row-gap: calc(10 * var(--u)); }
+  .v-theater .reels-grid.reels-locked .reel-vt-4 { grid-column: 4; grid-row: auto; }
 }
 .v-tease-scroll, .v-travel-scroll { display: flex; gap: calc(10 * var(--u)); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: calc(10 * var(--u)); margin-top: calc(14 * var(--u)); -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .v-tease-scroll::-webkit-scrollbar, .v-travel-scroll::-webkit-scrollbar { display: none; }

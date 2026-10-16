@@ -473,46 +473,71 @@ export default function AlbumsPanel() {
 
   // Drive → R2: download bytes server-side, store permanent R2 copies, attach to album.
   // Drive lh3 URLs are never stored — they 403/quota-throttle and break galleries.
+  // Small batches + resume: a timed-out batch keeps what's already copied; the
+  // leftovers stay listed so Copy can be clicked again without duplicating.
   const importDrive = async () => {
     if (!selected || !driveFiles.length) return;
     setBusy(true);
-    const ids = driveFiles.map((f) => f.id);
-    const BATCH = 12; // small batches: wedding files are 10-20MB, keeps each request < 60s
-    let done = 0;
+    const nameOf = (id: string) => driveFiles.find((f) => f.id === id)?.name ?? id.slice(0, 8);
+    let pending = driveFiles.map((f) => f.id);
+    const BATCH = 6; // small batches: wedding files are 10-20MB, keeps each request well under 60s
+    const total = pending.length;
     let importedTotal = 0;
+    let skippedTotal = 0;
     const errors: string[] = [];
-    setDriveProgress({ done: 0, total: ids.length });
-    for (let i = 0; i < ids.length; i += BATCH) {
-      const chunk = ids.slice(i, i + BATCH);
-      flash(`Copying Drive → R2: ${done + 1}–${done + chunk.length} of ${ids.length}…`);
+    setDriveProgress({ done: 0, total });
+    while (pending.length) {
+      const chunk = pending.slice(0, BATCH);
+      const doneCount = total - pending.length;
+      flash(`Copying Drive → R2: ${doneCount + 1}–${doneCount + chunk.length} of ${total}…`);
+      let progressed = false;
       try {
         const r = await fetch(`/api/drive/import-to-r2`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ albumSlug: selected, fileIds: chunk }),
         });
-        const d = (await r.json()) as {
+        type ImportResult = {
           imported?: { driveId: string }[];
           failed?: { driveId: string; error: string }[];
+          skipped?: string[];
           error?: string;
         };
-        if (!r.ok && !d.imported?.length) {
-          errors.push(d.error ?? `batch ${i / BATCH + 1} failed (${r.status})`);
-        } else {
-          importedTotal += d.imported?.length ?? 0;
-          for (const f of d.failed ?? []) errors.push(`${f.driveId.slice(0, 8)}: ${f.error}`);
+        let d: ImportResult | null = null;
+        try {
+          d = (await r.json()) as ImportResult;
+        } catch {
+          d = null;
         }
+        if (!d) {
+          errors.push(`server timed out (HTTP ${r.status}) — already-copied files are kept, click Copy again to resume`);
+          break;
+        }
+        const doneIds = new Set([...(d.imported ?? []).map((x) => x.driveId), ...(d.skipped ?? [])]);
+        importedTotal += d.imported?.length ?? 0;
+        skippedTotal += d.skipped?.length ?? 0;
+        for (const f of d.failed ?? []) errors.push(`${nameOf(f.driveId)}: ${f.error}`);
+        if (!r.ok && !doneIds.size) {
+          errors.push(d.error ?? `batch failed (${r.status}) — click Copy again to resume`);
+          break;
+        }
+        pending = pending.filter((id) => !doneIds.has(id));
+        progressed = true;
       } catch {
-        errors.push(`batch ${i / BATCH + 1}: network failed`);
+        errors.push("network failed — already-copied files are kept, click Copy again to resume");
+        break;
       }
-      done += chunk.length;
-      setDriveProgress({ done, total: ids.length });
+      setDriveProgress({ done: total - pending.length, total });
+      setDriveFiles((cur) => cur.filter((f) => pending.includes(f.id)));
       await select(selected);
+      if (!progressed) break;
     }
     setDriveProgress(null);
-    if (importedTotal) {
+    if (!pending.length) {
       flash(
-        `Stored ${importedTotal} permanent R2 cop${importedTotal > 1 ? "ies" : "y"}${errors.length ? `, ${errors.length} failed: ${errors[0].slice(0, 90)}` : ""}`
+        `Stored ${importedTotal} permanent R2 cop${importedTotal === 1 ? "y" : "ies"}` +
+          (skippedTotal ? `, ${skippedTotal} already in gallery` : "") +
+          (errors.length ? `, ${errors.length} failed: ${errors[errors.length - 1].slice(0, 110)}` : "")
       );
       setDriveFiles([]);
       setDriveLink("");
@@ -520,7 +545,11 @@ export default function AlbumsPanel() {
       setDriveMeta(null);
       await refresh();
     } else {
-      flash(`Drive → R2 copy failed: ${errors[0]?.slice(0, 140) ?? "unknown — check Drive sharing"}`);
+      flash(
+        `Paused with ${pending.length} left — click Copy again to resume` +
+          (errors.length ? `: ${errors[errors.length - 1].slice(0, 130)}` : "")
+      );
+      await refresh();
     }
     setBusy(false);
   };

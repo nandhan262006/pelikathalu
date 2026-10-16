@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addPhotos, getAlbumBySlug } from "@/lib/albums";
+import { addPhotos, getAlbumBySlug, listPhotos } from "@/lib/albums";
 import { copyDriveFileToR2, getR2Config } from "@/lib/r2";
 
 export const maxDuration = 60;
@@ -11,8 +11,10 @@ export const maxDuration = 60;
  * then attaches the R2 URLs to the album. Drive lh3 URLs are NEVER stored —
  * they are flaky (403/quota/sharing) and slow. R2 is the source of truth.
  *
- * Keep batches small from the client (10-15 ids per call) so no request
- * times out on 10-20MB wedding RAWs. Concurrency inside is capped at 3.
+ * Keep batches small from the client (4-6 ids per call) so no request
+ * times out on 10-20MB wedding files. Concurrency inside is capped at 3.
+ * Files already in the gallery (matched by Drive-id tag in the R2 key) are
+ * skipped, so retrying a failed batch never creates duplicates.
  */
 export async function POST(req: Request) {
   const r2 = getR2Config();
@@ -32,13 +34,38 @@ export async function POST(req: Request) {
   const album = await getAlbumBySlug(albumSlug);
   if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
 
+  // Resume-safe: R2 keys embed the Drive id (…-<8-char-id>.ext), so ids whose
+  // copies are already attached are skipped instead of duplicated.
+  const existing = await listPhotos(albumSlug);
+  const alreadyThere = (id: string) => {
+    const tag = `-${id.slice(0, 8)}.`;
+    return existing.some((p) => p.url.includes("/drive/") && p.url.includes(tag));
+  };
+  const skipped = fileIds.filter((id) => alreadyThere(id));
+  const fresh = fileIds.filter((id) => !alreadyThere(id));
+
+  if (!fresh.length) {
+    return NextResponse.json(
+      {
+        ok: true,
+        albumSlug,
+        imported: [],
+        failed: [],
+        skipped,
+        added: 0,
+        note: "All of these are already in the gallery — nothing to copy.",
+      },
+      { status: 200 }
+    );
+  }
+
   const imported: { driveId: string; r2Url: string; name: string }[] = [];
   const failed: { driveId: string; error: string }[] = [];
 
   // Concurrency 3 — Drive + R2 both prefer a few parallel streams over 20 at once.
   const CONC = 3;
-  for (let i = 0; i < fileIds.length; i += CONC) {
-    const chunk = fileIds.slice(i, i + CONC);
+  for (let i = 0; i < fresh.length; i += CONC) {
+    const chunk = fresh.slice(i, i + CONC);
     const results = await Promise.all(
       chunk.map(async (driveId) => {
         try {
@@ -65,11 +92,12 @@ export async function POST(req: Request) {
       albumSlug,
       imported,
       failed,
+      skipped,
       added: imported.length,
       note: imported.length
         ? "Stored permanent R2 copies — Drive links are not kept."
         : "Nothing imported. Check that Drive files are shared Anyone with the link → Viewer.",
     },
-    { status: imported.length ? 201 : 502 }
+    { status: imported.length || skipped.length ? (imported.length ? 201 : 200) : 502 }
   );
 }

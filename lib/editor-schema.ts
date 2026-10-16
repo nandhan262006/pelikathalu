@@ -1,4 +1,4 @@
-export type FieldType = "text" | "textarea" | "image" | "video" | "list" | "stringList" | "palette" | "reelLayout";
+export type FieldType = "text" | "textarea" | "image" | "video" | "list" | "stringList" | "palette";
 
 export interface FieldDef {
   path: string; // dot path from content root, e.g. "hero.eyebrow" or "reviews"
@@ -179,6 +179,13 @@ export const editorSections: SectionDef[] = [
       { path: "portraits.copy", label: "Copy", type: "textarea" },
       { path: "portraits.proof", label: "Proof line", type: "textarea" },
       { path: "portraits.cta", label: "CTA text", type: "text" },
+      { path: "portraits.bg", label: "Background image", type: "image" },
+      {
+        path: "portraits.grid",
+        label: "Band images",
+        type: "stringList",
+        itemField: { path: "", label: "Image", type: "image" },
+      },
     ],
   },
   {
@@ -197,7 +204,6 @@ export const editorSections: SectionDef[] = [
       { path: "theater.title", label: "Title", type: "text" },
       { path: "theater.cineHint", label: "Hint text", type: "text" },
       { path: "theater.hand", label: "Handwritten note", type: "text" },
-      { path: "theater.reels", label: "Block positions", type: "reelLayout" },
       {
         path: "theater.reels",
         label: "Reels",

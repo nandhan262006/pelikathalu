@@ -10,6 +10,10 @@ type Corner = "nw" | "ne" | "sw" | "se";
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
 
+// The curated 5-reel desktop art direction. Locks apply only when the full set is
+// present — any other count falls back to dense auto-flow (see globals.css).
+const KNOWN_SPOTS = ["reel-vt-1", "reel-vt-2", "reel-vt-4", "reel-vt-w1", "reel-vt-w2"];
+
 const SpeakerOff = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M11 5 6.5 9H3v6h3.5L11 19V5z" fill="currentColor" stroke="none" />
@@ -30,12 +34,14 @@ export default function Reels({
   onMove,
   onSnapshot,
   canvasH,
+  canvasRatio,
 }: {
   reels: Reel[];
   edit?: boolean;
   onMove?: (i: number, pos: ReelPos) => void;
-  onSnapshot?: (items: ({ i: number } & ReelPos)[], boxH: number) => void;
+  onSnapshot?: (items: ({ i: number } & ReelPos)[], boxH: number, ratio: number) => void;
   canvasH?: number;
+  canvasRatio?: number;
 }) {
   const [unmuted, setUnmuted] = useState<number | null>(null);
   // Tall (9:16) until metadata proves otherwise — tiles adapt per video.
@@ -110,9 +116,10 @@ export default function Reels({
   };
 
   // Entering arrange mode: convert every reel from grid slot to absolute coords in one shot.
+  // Also re-runs (debounced) on window resize so the canvas ratio follows the viewport.
   useEffect(() => {
     if (!edit || !onSnapshot) return;
-    const t = setTimeout(() => {
+    const snap = () => {
       const box = gridRef.current?.getBoundingClientRect();
       if (!box || box.width === 0 || box.height === 0) return;
       const els = Array.from(gridRef.current?.querySelectorAll(".reel") ?? []) as HTMLElement[];
@@ -130,9 +137,20 @@ export default function Reels({
           };
         })
         .filter((v): v is { i: number } & ReelPos => v !== null);
-      onSnapshot(items, Math.round(box.height));
-    }, 80);
-    return () => clearTimeout(t);
+      onSnapshot(items, Math.round(box.height), r1(box.width / box.height));
+    };
+    const t = setTimeout(snap, 80);
+    let rt: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      if (rt) clearTimeout(rt);
+      rt = setTimeout(snap, 400);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      clearTimeout(t);
+      if (rt) clearTimeout(rt);
+      window.removeEventListener("resize", onResize);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edit]);
 
@@ -238,12 +256,26 @@ export default function Reels({
     };
   }, [full, closeFull, stepFull]);
 
+  // Ratio canvas wins over the legacy px snapshot; spot locks need the full 5-spot set.
+  const ratioMode = canvasRatio != null && canvasRatio > 0;
+  const placedLegacy = !ratioMode && canvasH != null;
+  const locked =
+    reels.length === KNOWN_SPOTS.length &&
+    reels.every((r) => r.spot != null && KNOWN_SPOTS.includes(r.spot)) &&
+    new Set(reels.map((r) => r.spot)).size === KNOWN_SPOTS.length;
+
   return (
     <>
       <div
-        className={`reels-grid${edit ? " editing" : ""}${canvasH ? " placed" : ""}`}
+        className={`reels-grid${edit ? " editing" : ""}${ratioMode ? " placed-ratio" : placedLegacy ? " placed" : ""}${locked ? " reels-locked" : ""}`}
         ref={gridRef}
-        style={canvasH ? ({ ["--theater-h" as string]: `${canvasH}px` } as CSSProperties) : undefined}
+        style={
+          ratioMode
+            ? ({ ["--theater-ratio" as string]: `${canvasRatio}` } as CSSProperties)
+            : placedLegacy
+              ? ({ ["--theater-h" as string]: `${canvasH}px` } as CSSProperties)
+              : undefined
+        }
       >
         {reels.map((r, i) => {
           const pos = live && live.i === i ? live : r.x != null && r.y != null && r.w != null && r.h != null ? r : null;

@@ -4,9 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { editorSections, type FieldDef } from "@/lib/editor-schema";
 import { ListField, StringListField, MediaField, TextField, PalettePicker, CropPicker } from "./fields";
-import TheaterLayout from "./TheaterLayout";
 import AlbumsPanel from "./AlbumsPanel";
-import type { Reel, SiteContent } from "@/lib/content";
+import type { SiteContent } from "@/lib/content";
 import "@/app/admin/dashboard.css";
 
 type Content = SiteContent & Record<string, unknown>;
@@ -127,6 +126,7 @@ export default function Dashboard({ site }: { site: string }) {
         h?: number;
         items?: { i: number; x: number; y: number; w: number; h: number }[];
         boxH?: number;
+        ratio?: number;
       };
       if (d?.type === "pk-reel-pos" && d.index != null && d.x != null && d.y != null && d.w != null && d.h != null) {
         setContent((c) => {
@@ -150,6 +150,7 @@ export default function Dashboard({ site }: { site: string }) {
             next = setIn(next, `theater.reels.${it.i}`, { ...reel, x: it.x, y: it.y, w: it.w, h: it.h });
           }
           if (d.boxH) next = setIn(next, "theater.canvasH", d.boxH);
+          if (d.ratio) next = setIn(next, "theater.canvasRatio", d.ratio);
           return next;
         });
       }
@@ -227,8 +228,6 @@ export default function Dashboard({ site }: { site: string }) {
                     {sec.fields.map((f: FieldDef) =>
                       f.type === "list" ? (
                         <ListField key={`${f.path}:${f.type}`} def={f} value={(getIn(content, f.path) as Record<string, unknown>[]) ?? []} onChange={(v) => onChange(f.path, v)} />
-                      ) : f.type === "reelLayout" ? (
-                        <TheaterLayout key={`${f.path}:${f.type}`} value={(getIn(content, f.path) as Reel[]) ?? []} onChange={(v) => onChange(f.path, v)} />
                       ) : f.type === "stringList" ? (
                         <StringListField key={`${f.path}:${f.type}`} def={f} value={(getIn(content, f.path) as string[]) ?? []} onChange={(v) => onChange(f.path, v)} />
                       ) : f.type === "palette" ? (

@@ -154,7 +154,8 @@ export async function downloadDriveBytes(
   if (!k) throw new Error("DRIVE_API_KEY not configured");
 
   const meta = await driveFileMeta(id, k);
-  if (!meta) throw new Error("Drive file not found or not public (share → Anyone with the link → Viewer)");
+  if (!meta)
+    throw new Error("Drive file not found or not public (share → Anyone with the link → Viewer; or API quota hit — wait a minute and resume)");
   if (meta.mimeType === "application/vnd.google-apps.folder")
     throw new Error(`"${meta.name}" is a folder, not an image — use a folder link instead`);
   if (!meta.mimeType.startsWith("image/") && !meta.mimeType.startsWith("video/"))

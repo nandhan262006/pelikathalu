@@ -52,6 +52,9 @@ export interface SiteContent {
     copy: string;
     proof: string;
     cta: string;
+    grid: string[];
+    bg: string;
+    bgCrop?: string;
   };
   weddings: { heading: string; coupleNames: string; sub: string; albumSlug: string };
   theater: {
@@ -60,7 +63,8 @@ export interface SiteContent {
     cineHint: string;
     hand: string;
     reels: Reel[];
-    canvasH?: number; // measured theater canvas height (px) once reels are free-placed
+    canvasH?: number; // legacy: measured theater canvas height (px) once reels are free-placed
+    canvasRatio?: number; // preferred: canvas width/height ratio — scales the composition at any viewport
   };
   gallery: { heading: string; small: string; cta: string; items: Tease[] };
   reviews: Review[];
@@ -215,6 +219,8 @@ export const defaultContent: SiteContent = {
     copy: "Our creative vision led us to build our Portraits page, where we explore people, personalities and powerful visual identities. That journey has taken us from everyday portraits to working with well-known celebrities and personalities, who trusted our vision and our way of seeing them.",
     proof: "That recognition is not just a milestone — it's proof that a strong vision can take you places you never imagined.",
     cta: "Explore Portraits",
+    grid: ["/images/recent-1.jpg", "/images/recent-3.jpg", "/images/weddings.jpg"],
+    bg: "/images/hero2.jpg",
   },
   weddings: {
     heading: "Weddings",

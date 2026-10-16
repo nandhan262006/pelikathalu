@@ -75,8 +75,8 @@ export default function SiteRenderer({
     []
   );
   const snapshotReels = useCallback(
-    (items: { i: number; x: number; y: number; w: number; h: number }[], boxH: number) => {
-      window.parent.postMessage({ type: "pk-reel-snap", items, boxH }, window.location.origin);
+    (items: { i: number; x: number; y: number; w: number; h: number }[], boxH: number, ratio: number) => {
+      window.parent.postMessage({ type: "pk-reel-snap", items, boxH, ratio }, window.location.origin);
     },
     []
   );
@@ -314,7 +314,14 @@ export default function SiteRenderer({
         </section>
 
         {/* Portraits & personalities */}
-        <section className="v-portraits" id="portraits">
+        <section
+          className="v-portraits"
+          id="portraits"
+          style={{
+            ...(c.portraits.bg ? { backgroundImage: `url("${c.portraits.bg}")` } : {}),
+            ...(c.portraits.bgCrop ? { backgroundPosition: c.portraits.bgCrop } : {}),
+          }}
+        >
           <div className="v-portraits-inner">
             <p className="script v-portraits-script" data-reveal>{c.portraits.script}</p>
             <h2 className="v-big v-big-inv" data-reveal style={{ transitionDelay: "80ms" }}>
@@ -326,7 +333,7 @@ export default function SiteRenderer({
             <p className="v-portraits-proof" data-reveal style={{ transitionDelay: "220ms" }}>
               {c.portraits.proof}
             </p>
-            {(featuredPortraits.length > 0 ? featuredPortraits : portraitAlbums).length > 0 && (
+            {(featuredPortraits.length > 0 ? featuredPortraits : portraitAlbums).length > 0 ? (
               <div className="v-tease-scroll" data-reveal style={{ transitionDelay: "240ms" }}>
                 {(featuredPortraits.length > 0 ? featuredPortraits : portraitAlbums).slice(0, 6).map((a) => (
                   <a key={a.slug} href={`/portraits/${a.slug}`} className="v-tease-card">
@@ -335,6 +342,16 @@ export default function SiteRenderer({
                   </a>
                 ))}
               </div>
+            ) : (
+              (c.portraits.grid ?? []).length > 0 && (
+                <div className="v-tease-scroll" data-reveal style={{ transitionDelay: "240ms" }}>
+                  {(c.portraits.grid ?? []).slice(0, 6).map((src) => (
+                    <a key={src} href="/portraits" className="v-tease-card">
+                      <div className="v-tease-img" style={{ backgroundImage: `url("${src}")` }} />
+                    </a>
+                  ))}
+                </div>
+              )
             )}
             <div data-reveal style={{ transitionDelay: "280ms" }}>
               <a href="/portraits" className="v-underline-cta v-cta-inv">
@@ -371,7 +388,7 @@ export default function SiteRenderer({
             <span className="cine-hint">{c.theater.cineHint}</span>
           </div>
           <div className={`theater-box${arrange ? " arranging" : ""}`}>
-            <Reels reels={c.theater.reels} edit={arrange} onMove={moveReel} onSnapshot={snapshotReels} canvasH={c.theater.canvasH} />
+            <Reels reels={c.theater.reels} edit={arrange} onMove={moveReel} onSnapshot={snapshotReels} canvasH={c.theater.canvasH} canvasRatio={c.theater.canvasRatio} />
             {arrange && <p className="arrange-hint">Drag reels to move · corner handle to resize — releases autosave</p>}
           </div>
           <p className="v-hand">{c.theater.hand}</p>
