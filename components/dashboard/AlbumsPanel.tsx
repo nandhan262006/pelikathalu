@@ -473,36 +473,43 @@ export default function AlbumsPanel() {
 
   // Drive → R2: download bytes server-side, store permanent R2 copies, attach to album.
   // Drive lh3 URLs are never stored — they 403/quota-throttle and break galleries.
-  // Small batches + resume: a timed-out batch keeps what's already copied; the
-  // leftovers stay listed so Copy can be clicked again without duplicating.
+  // Speed: 3 workers × 6-id chunks run concurrently (≈9 files in flight; the server
+  // copies 4 per request). Each id gets one attempt per run; imported photos are
+  // appended to the grid locally (no per-batch album refetch — one at the end).
+  // Resume: anything not imported stays listed — click Copy again, server skips
+  // what's already there, so retries never duplicate.
   const importDrive = async () => {
     if (!selected || !driveFiles.length) return;
     setBusy(true);
     const nameOf = (id: string) => driveFiles.find((f) => f.id === id)?.name ?? id.slice(0, 8);
-    let pending = driveFiles.map((f) => f.id);
-    const BATCH = 6; // small batches: wedding files are 10-20MB, keeps each request well under 60s
-    const total = pending.length;
+    const BATCH = 6; // small batches: wedding files are 10-20MB, keeps each request well under 120s
+    const WORKERS = 3; // concurrent requests → up to 9 files in flight
+    const total = driveFiles.length;
+    const queue = driveFiles.map((f) => f.id);
+    const remaining = new Set<string>(); // failed / not-accounted ids → stay listed for resume
     let importedTotal = 0;
     let skippedTotal = 0;
+    let doneCount = 0;
+    let tmpId = -1; // temp ids for grid rows appended before the final refetch
     const errors: string[] = [];
     setDriveProgress({ done: 0, total });
-    while (pending.length) {
-      const chunk = pending.slice(0, BATCH);
-      const doneCount = total - pending.length;
-      flash(`Copying Drive → R2: ${doneCount + 1}–${doneCount + chunk.length} of ${total}…`);
-      let progressed = false;
+
+    type ImportResult = {
+      imported?: { driveId: string; r2Url: string; name: string }[];
+      failed?: { driveId: string; error: string }[];
+      skipped?: string[];
+      error?: string;
+    };
+
+    const runChunk = async (ids: string[]) => {
+      const finished = new Set<string>(); // imported/skipped → drop from the list
+      const processed = new Set<string>(); // attempted → counts toward progress
       try {
         const r = await fetch(`/api/drive/import-to-r2`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ albumSlug: selected, fileIds: chunk }),
+          body: JSON.stringify({ albumSlug: selected, fileIds: ids }),
         });
-        type ImportResult = {
-          imported?: { driveId: string }[];
-          failed?: { driveId: string; error: string }[];
-          skipped?: string[];
-          error?: string;
-        };
         let d: ImportResult | null = null;
         try {
           d = (await r.json()) as ImportResult;
@@ -510,30 +517,60 @@ export default function AlbumsPanel() {
           d = null;
         }
         if (!d) {
-          errors.push(`server timed out (HTTP ${r.status}) — already-copied files are kept, click Copy again to resume`);
-          break;
+          ids.forEach((id) => remaining.add(id));
+          errors.push(`a batch timed out (HTTP ${r.status}) — copied files are kept, click Copy again to resume`);
+          return;
         }
         const doneIds = new Set([...(d.imported ?? []).map((x) => x.driveId), ...(d.skipped ?? [])]);
+        const failedIds = new Set((d.failed ?? []).map((f) => f.driveId));
         importedTotal += d.imported?.length ?? 0;
         skippedTotal += d.skipped?.length ?? 0;
-        for (const f of d.failed ?? []) errors.push(`${nameOf(f.driveId)}: ${f.error}`);
-        if (!r.ok && !doneIds.size) {
-          errors.push(d.error ?? `batch failed (${r.status}) — click Copy again to resume`);
-          break;
+        for (const f of d.failed ?? []) {
+          errors.push(`${nameOf(f.driveId)}: ${f.error}`);
+          remaining.add(f.driveId); // stay listed so Copy can be clicked again
         }
-        pending = pending.filter((id) => !doneIds.has(id));
-        progressed = true;
+        if (!r.ok && !doneIds.size && !failedIds.size) {
+          ids.forEach((id) => remaining.add(id));
+          errors.push(d.error ?? `batch failed (${r.status}) — click Copy again to resume`);
+          return;
+        }
+        doneIds.forEach((id) => finished.add(id));
+        [...doneIds, ...failedIds].forEach((id) => processed.add(id));
+        // Grid update without refetch: append the permanent R2 copies now; the
+        // final select() swaps temp ids for real rows.
+        const news = (d.imported ?? []).map((x) => ({ url: x.r2Url, caption: x.name }));
+        if (news.length) {
+          setPhotos((cur) => {
+            const base = cur.length ? Math.max(...cur.map((p) => p.sort)) : 0;
+            return [
+              ...cur,
+              ...news.map((n, i) => ({ id: tmpId--, url: n.url, caption: n.caption, sort: base + i + 1 })),
+            ];
+          });
+        }
       } catch {
-        errors.push("network failed — already-copied files are kept, click Copy again to resume");
-        break;
+        ids.forEach((id) => remaining.add(id));
+        errors.push("network failed — copied files are kept, click Copy again to resume");
+        return;
+      } finally {
+        const unaccounted = ids.filter((id) => !processed.has(id) && !remaining.has(id));
+        unaccounted.forEach((id) => remaining.add(id));
+        doneCount += processed.size;
+        if (finished.size) setDriveFiles((cur) => cur.filter((f) => !finished.has(f.id)));
+        setDriveProgress({ done: doneCount, total });
       }
-      setDriveProgress({ done: total - pending.length, total });
-      setDriveFiles((cur) => cur.filter((f) => pending.includes(f.id)));
-      await select(selected);
-      if (!progressed) break;
-    }
+    };
+
+    const worker = async () => {
+      while (queue.length) {
+        const ids = queue.splice(0, BATCH);
+        await runChunk(ids);
+      }
+    };
+    await Promise.all(Array.from({ length: WORKERS }, () => worker()));
+
     setDriveProgress(null);
-    if (!pending.length) {
+    if (!remaining.size) {
       flash(
         `Stored ${importedTotal} permanent R2 cop${importedTotal === 1 ? "y" : "ies"}` +
           (skippedTotal ? `, ${skippedTotal} already in gallery` : "") +
@@ -543,10 +580,11 @@ export default function AlbumsPanel() {
       setDriveLink("");
       setDriveKind(null);
       setDriveMeta(null);
+      await select(selected); // one refetch swaps temp grid rows for real ids
       await refresh();
     } else {
       flash(
-        `Paused with ${pending.length} left — click Copy again to resume` +
+        `Paused with ${remaining.size} left — click Copy again to resume` +
           (errors.length ? `: ${errors[errors.length - 1].slice(0, 130)}` : "")
       );
       await refresh();

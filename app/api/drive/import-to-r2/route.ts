@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { addPhotos, getAlbumBySlug, listPhotos } from "@/lib/albums";
 import { copyDriveFileToR2, getR2Config } from "@/lib/r2";
 
-export const maxDuration = 60;
+export const maxDuration = 120; // Hobby Fluid allows 300; 120 is headroom over the old 60
 
 /**
  * POST /api/drive/import-to-r2
@@ -11,8 +11,8 @@ export const maxDuration = 60;
  * then attaches the R2 URLs to the album. Drive lh3 URLs are NEVER stored —
  * they are flaky (403/quota/sharing) and slow. R2 is the source of truth.
  *
- * Keep batches small from the client (4-6 ids per call) so no request
- * times out on 10-20MB wedding files. Concurrency inside is capped at 3.
+ * Keep batches small from the client (4-6 ids per call, 3 batches in parallel)
+ * so no request times out on 10-20MB wedding files. Concurrency inside is 4.
  * Files already in the gallery (matched by Drive-id tag in the R2 key) are
  * skipped, so retrying a failed batch never creates duplicates.
  */
@@ -62,8 +62,9 @@ export async function POST(req: Request) {
   const imported: { driveId: string; r2Url: string; name: string }[] = [];
   const failed: { driveId: string; error: string }[] = [];
 
-  // Concurrency 3 — Drive + R2 both prefer a few parallel streams over 20 at once.
-  const CONC = 3;
+  // Concurrency 4 — with 3 parallel client batches that's ≤12 streams overall,
+  // still modest for Drive API-key quota while keeping a 6-id batch well inside 120s.
+  const CONC = 4;
   for (let i = 0; i < fresh.length; i += CONC) {
     const chunk = fresh.slice(i, i + CONC);
     const results = await Promise.all(

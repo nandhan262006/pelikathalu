@@ -153,7 +153,14 @@ export async function downloadDriveBytes(
   const k = key ?? driveKey();
   if (!k) throw new Error("DRIVE_API_KEY not configured");
 
-  const meta = await driveFileMeta(id, k);
+  // Meta and download are independent — fire both at once and merge (saves a
+  // serial Drive roundtrip per file; meta is only used for validation/name/mime).
+  const metaP = driveFileMeta(id, k);
+  const mediaP = fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&key=${encodeURIComponent(k)}`
+  );
+  const [meta, media] = await Promise.all([metaP, mediaP]);
+
   if (!meta)
     throw new Error("Drive file not found or not public (share → Anyone with the link → Viewer; or API quota hit — wait a minute and resume)");
   if (meta.mimeType === "application/vnd.google-apps.folder")
@@ -165,7 +172,7 @@ export async function downloadDriveBytes(
   if (size > 60 * 1024 * 1024) throw new Error(`"${meta.name}" is ${(size / 1048576).toFixed(0)}MB — over 60MB limit`);
 
   // 1) Official API download — most reliable for public files + API key
-  let r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&key=${encodeURIComponent(k)}`);
+  let r = media;
   if (!r.ok) {
     // 2) Keyless CDN fallbacks (work when file is truly "Anyone with link")
     r = await fetch(`https://lh3.googleusercontent.com/d/${id}=w4000`);
