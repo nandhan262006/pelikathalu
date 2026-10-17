@@ -79,23 +79,32 @@ export default function Dashboard({ site }: { site: string }) {
       // Skip if nothing changed since the last successful save.
       if (baselineRef.current && JSON.stringify(c) === JSON.stringify(baselineRef.current)) return;
       setSaveState("saving");
-      const r = await fetch(`/api/sites/${site}/content`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: c }),
-      });
-      if (!r.ok) {
+      try {
+        const r = await fetch(`/api/sites/${site}/content`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: c }),
+        });
+        if (!r.ok) {
+          setSaveState("idle");
+          flash(`Save failed (${r.status})`);
+          return;
+        }
+        // Baseline gets the content THIS run sent. Text typed during the
+        // in-flight PUT only exists in state — the rerender leaves `dirty`
+        // true, and the autosave effect below (keyed on `content`) re-arms
+        // and queues a fresh chained save for it.
+        baselineRef.current = structuredClone(c);
+        setBaseline(baselineRef.current);
+        setSaveState("saved");
+        // Push straight into the draft iframe — instant, no reload, keeps scroll.
+        const frame = frameRef.current?.contentWindow;
+        if (frame) frame.postMessage({ type: "pk-preview", content: c }, window.location.origin);
+        else setPreviewKey(Date.now());
+      } catch {
         setSaveState("idle");
-        flash(`Save failed (${r.status})`);
-        return;
+        flash("Save failed — network");
       }
-      baselineRef.current = structuredClone(c);
-      setBaseline(baselineRef.current);
-      setSaveState("saved");
-      // Push straight into the draft iframe — instant, no reload, keeps scroll.
-      const frame = frameRef.current?.contentWindow;
-      if (frame) frame.postMessage({ type: "pk-preview", content: c }, window.location.origin);
-      else setPreviewKey(Date.now());
     });
     saveChainRef.current = run.catch(() => {});
     return run;
@@ -104,14 +113,16 @@ export default function Dashboard({ site }: { site: string }) {
   // Arrange mode: reels draggable in the preview; autosave is held while on.
   const [arrange, setArrange] = useState(false);
 
-  // Debounced autosave: preview follows every edit ~700ms after typing pauses.
-  // Held while arrange mode is on — reel drags update state continuously;
-  // "Done arranging" issues a single save instead.
+  // Debounced autosave, keyed on `content` so EVERY keystroke re-arms the
+  // timer: saves fire 700ms after the last edit, never miss edits made while
+  // a previous PUT is still in flight, and never arm while arrange mode
+  // holds its updates ("Done arranging" issues a single save instead).
   useEffect(() => {
     if (!dirty || status !== "ready" || arrange) return;
-    const t = setTimeout(() => void save(), 700);
+    // 1.5s: lazier autosave — fewer PUTs during crop/slider dragging, still instant-feeling.
+    const t = setTimeout(() => void save(), 1500);
     return () => clearTimeout(t);
-  }, [dirty, status, arrange, save]);
+  }, [content, dirty, status, arrange, save]);
 
   const publish = useCallback(async () => {
     if (dirty) await save();

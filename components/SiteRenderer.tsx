@@ -190,9 +190,26 @@ export default function SiteRenderer({
         {/* Duo */}
         <section className="v-duo" id="duo">
           <div className="v-duo-inner">
-            <div className="v-team-photo" role="img" aria-label="Prem and Pavan photo coming soon">
-              <span className="v-team-ph">Prem &amp; Pavan photo</span>
-              <span className="v-team-sub">Drop file at /images/team.jpg to replace</span>
+            {/* Duo photo: admin-set image (crop honoured); falls back to the CSS default */}
+            <div
+              className="v-team-photo"
+              role="img"
+              aria-label={c.duo.img ? "Prem and Pavan" : "Prem and Pavan photo coming soon"}
+              style={
+                c.duo.img
+                  ? {
+                      backgroundImage: `url("${c.duo.img}")`,
+                      ...(c.duo.imgCrop ? { backgroundPosition: c.duo.imgCrop } : {}),
+                    }
+                  : undefined
+              }
+            >
+              {!c.duo.img && (
+                <>
+                  <span className="v-team-ph">Prem &amp; Pavan photo</span>
+                  <span className="v-team-sub">Upload a photo in the admin → About the Duo</span>
+                </>
+              )}
             </div>
             <div className="v-duo-text">
               <p className="script v-script">{c.duo.scriptLine}</p>

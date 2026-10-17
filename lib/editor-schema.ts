@@ -69,6 +69,7 @@ export const editorSections: SectionDef[] = [
       { path: "duo.copy", label: "Copy", type: "textarea" },
       { path: "duo.cta", label: "CTA text", type: "text" },
       { path: "duo.hand", label: "Handwritten note", type: "text" },
+      { path: "duo.img", label: "Duo photo", type: "image" },
     ],
   },
   {

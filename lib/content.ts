@@ -25,6 +25,8 @@ export interface SiteContent {
     copy: string;
     cta: string;
     hand: string;
+    img?: string;
+    imgCrop?: string;
   };
   littleThings: {
     script: string;
@@ -125,6 +127,7 @@ export const defaultContent: SiteContent = {
     copy: "Prem Chandra and Pavan began their journey behind cameras, capturing people, emotions and moments — long before Pellikathalu had a name. What started as two friends with cameras has grown into a Hyderabad-based wedding photography and cinematography studio built on passion, trust and the stories of the people who choose us.",
     cta: "The Full Story",
     hand: "prem and pavan may ask you to laugh for the last time, 16 times",
+    img: "/images/team.jpg",
   },
   littleThings: {
     script: "the little things",
