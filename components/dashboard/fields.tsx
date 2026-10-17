@@ -10,11 +10,48 @@ export async function uploadToR2(file: File): Promise<string> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ contentType: file.type, filename: file.name }),
   });
-  if (!metaRes.ok) throw new Error(`upload-url ${metaRes.status}`);
+  if (!metaRes.ok) {
+    let msg = `upload-url ${metaRes.status}`;
+    try {
+      const j = (await metaRes.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* keep generic */
+    }
+    throw new Error(msg);
+  }
   const meta = (await metaRes.json()) as { uploadUrl: string; publicUrl: string; contentType?: string };
   const putType = meta.contentType || file.type || "application/octet-stream";
   const put = await fetch(meta.uploadUrl, { method: "PUT", headers: { "content-type": putType }, body: file });
-  if (!put.ok) throw new Error(`upload ${put.status}`);
+  if (!put.ok) {
+    let detail = await put.text().catch(() => "");
+    try {
+      const j = JSON.parse(detail) as { message?: string };
+      if (j.message) detail = j.message;
+    } catch {
+      detail = detail.slice(0, 120);
+    }
+    throw new Error(`R2 upload ${put.status}${detail ? `: ${detail}` : ""}`);
+  }
+  // HEIC/TIFF bytes are undisplayable in Chrome/Firefox — ask the server to
+  // convert the stored object to a display JPEG. Best-effort: keep the
+  // original link if conversion fails.
+  const stored = (meta.contentType || file.type || "").toLowerCase();
+  if (/heic|heif|tiff/.test(stored)) {
+    try {
+      const c = await fetch("/api/r2/convert", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: meta.publicUrl }),
+      });
+      if (c.ok) {
+        const d = (await c.json()) as { publicUrl?: string };
+        if (d.publicUrl) return d.publicUrl;
+      }
+    } catch {
+      /* fall through with the original url */
+    }
+  }
   return meta.publicUrl;
 }
 

@@ -35,7 +35,10 @@ type DriveFile = { id: string; name: string; url: string; thumb: string };
 
 type PickedFile = { file: File; path: string };
 
-const MEDIA_RE = /\.(jpe?g|png|webp|gif|avif|bmp|heic|heif|tif|tiff|svg|dng|mp4|mov|webm)$/i;
+const MEDIA_RE = /\.(jpe?g|png|webp|gif|avif|bmp|heic|heif|tif|tiff|svg|mp4|mov|webm)$/i;
+
+/** Nothing wider than this gets uploaded — protects upload slots and R2 storage. */
+const MAX_FILE_BYTES = 250 * 1024 * 1024;
 
 function isMediaFile(f: File, path?: string): boolean {
   if (f.type.startsWith("image/") || f.type.startsWith("video/")) return true;
@@ -518,17 +521,21 @@ export default function AlbumsPanel() {
   const uploadPickedToAlbum = async (slug: string, picked: PickedFile[]) => {
     const sorted = sortPicked(picked);
     const media = sorted.filter((p) => isMediaFile(p.file, p.path));
+    const oversize = media.filter((p) => p.file.size > MAX_FILE_BYTES);
+    const usable = media.filter((p) => p.file.size <= MAX_FILE_BYTES);
     const skipped = sorted.length - media.length;
-    if (!media.length) {
+    if (!usable.length) {
       flash(
-        skipped > 0
-          ? `No photos found — skipped ${skipped} non-image file${skipped > 1 ? "s" : ""}`
-          : "No files found in that drop"
+        oversize.length
+          ? `Nothing uploaded — ${oversize.length} file${oversize.length > 1 ? "s are" : " is"} over 250MB (export JPEG to shrink)`
+          : skipped > 0
+            ? `No photos found — skipped ${skipped} non-image file${skipped > 1 ? "s" : ""}`
+            : "No files found in that drop"
       );
       return;
     }
-    flash(`Uploading ${media.length} photo${media.length > 1 ? "s" : ""}…`);
-    const { urls, failed } = await uploadBatchToR2(media.map((p) => p.file));
+    flash(`Uploading ${usable.length} photo${usable.length > 1 ? "s" : ""}…`);
+    const { urls, failed } = await uploadBatchToR2(usable.map((p) => p.file));
     setUploadProgress(null);
     const good = urls.filter((u): u is string => !!u);
     if (!good.length) {
@@ -542,6 +549,7 @@ export default function AlbumsPanel() {
     flash(
       `Added ${good.length} photo${good.length > 1 ? "s" : ""}` +
         (failed.length ? `, ${failed.length} failed (${failed[0].slice(0, 40)})` : "") +
+        (oversize ? `, skipped ${oversize.length} over 250MB` : "") +
         (skipped ? `, skipped ${skipped} non-image` : "") +
         " ✓"
     );
@@ -1123,7 +1131,7 @@ export default function AlbumsPanel() {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="image/*,video/*,.heic,.heif,.avif,.gif,.bmp,.tif,.tiff,.dng"
+                  accept="image/*,video/*,.heic,.heif,.avif,.gif,.bmp,.tif,.tiff"
                   hidden
                   multiple
                   onChange={(e) => void uploadFiles(e.target.files)}
@@ -1131,7 +1139,7 @@ export default function AlbumsPanel() {
                 <input
                   ref={folderRef}
                   type="file"
-                  accept="image/*,video/*,.heic,.heif,.avif,.gif,.bmp,.tif,.tiff,.dng"
+                  accept="image/*,video/*,.heic,.heif,.avif,.gif,.bmp,.tif,.tiff"
                   hidden
                   multiple
                   {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}

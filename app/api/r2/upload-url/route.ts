@@ -33,7 +33,6 @@ const EXT_FALLBACK: Record<string, { ext: string; prefix: string; contentType: s
   tif: { ext: "tif", prefix: "images/uploads", contentType: "image/tiff" },
   tiff: { ext: "tif", prefix: "images/uploads", contentType: "image/tiff" },
   svg: { ext: "svg", prefix: "images/uploads", contentType: "image/svg+xml" },
-  dng: { ext: "dng", prefix: "images/uploads", contentType: "image/dng" },
   mp4: { ext: "mp4", prefix: "videos/uploads", contentType: "video/mp4" },
   mov: { ext: "mov", prefix: "videos/uploads", contentType: "video/quicktime" },
   webm: { ext: "webm", prefix: "videos/uploads", contentType: "video/webm" },
@@ -57,7 +56,12 @@ export async function POST(req: Request) {
     }
   }
   if (!type) {
-    return NextResponse.json({ error: `unsupported contentType (${contentType})` }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: `unsupported file type (${contentType || "unknown"}) — use JPG/PNG/WebP/GIF/AVIF/HEIC/TIFF, or MP4/MOV/WebM. RAW formats (.dng etc.) are not supported — export JPEG instead.`,
+      },
+      { status: 400 }
+    );
   }
 
   const endpoint = process.env.R2_ENDPOINT;

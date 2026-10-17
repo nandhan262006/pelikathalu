@@ -233,7 +233,7 @@ export async function downloadDriveBytes(
  * orientation. Returns the recompressed bytes (content-type image/jpeg), or
  * null when the format can't be decoded / is a video — caller keeps original.
  */
-async function mediumBytes(
+export async function mediumBytes(
   bytes: Uint8Array,
   contentType: string
 ): Promise<{ body: Uint8Array; contentType: string } | null> {
