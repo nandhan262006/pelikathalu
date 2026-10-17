@@ -1,8 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { uploadToR2 } from "./fields";
 import PhotoPreview from "./PhotoPreview";
+
+/* ============================================================================
+   Albums — Weddings & Portraits (admin panel, rebuilt)
+   One section, three layers:
+     1. Album list   — stats, filters, create, folder-drop to bulk-create
+     2. Album editor — info, cover, photo grid (reorder/cover/delete)
+     3. Add photos   — files/folder/drop, paste URLs, Drive → R2 import
+   Server contracts (unchanged): /api/albums, /api/albums/[slug](/photos…),
+   /api/r2/upload-url, /api/drive/resolve, /api/drive/import-to-r2.
+   ========================================================================== */
 
 type Album = {
   id: number;
@@ -16,7 +26,10 @@ type Album = {
   category: "wedding" | "portrait";
   featured: boolean;
 };
+
 type Photo = { id: number; url: string; caption: string | null; sort: number };
+
+type DriveFile = { id: string; name: string; url: string; thumb: string };
 
 type PickedFile = { file: File; path: string };
 
@@ -34,37 +47,17 @@ function sortPicked(list: PickedFile[]): PickedFile[] {
 }
 
 function prettifyFolder(name: string): string {
-  return name
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .slice(0, 80) || "Untitled gallery";
+  return (
+    name
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .slice(0, 80) || "Untitled gallery"
+  );
 }
 
-// Read a directory entry recursively — this is what makes folder drops work.
-// Uses webkitGetAsEntry (Chrome/Edge/Safari); falls back to flat file list elsewhere.
-function readDirEntries(reader: {
-  readEntries(
-    ok: (entries: FileSystemEntryLike[]) => void,
-    err?: (e: Error) => void
-  ): void;
-}): Promise<FileSystemEntryLike[]> {
-  return new Promise((resolve, reject) => {
-    const all: FileSystemEntryLike[] = [];
-    const read = () => {
-      reader.readEntries(
-        (batch) => {
-          if (!batch.length) return resolve(all);
-          all.push(...batch);
-          read();
-        },
-        (e) => reject(e)
-      );
-    };
-    read();
-  });
-}
+/* ---------------- folder drag-and-drop (recursive walk) ---------------- */
 
 type FileSystemEntryLike = {
   isFile: boolean;
@@ -73,12 +66,25 @@ type FileSystemEntryLike = {
   name: string;
   file(ok: (f: File) => void, err?: (e: Error) => void): void;
   createReader(): {
-    readEntries(
-      ok: (entries: FileSystemEntryLike[]) => void,
-      err?: (e: Error) => void
-    ): void;
+    readEntries(ok: (entries: FileSystemEntryLike[]) => void, err?: (e: Error) => void): void;
   };
 };
+
+function readDirEntries(reader: {
+  readEntries(ok: (entries: FileSystemEntryLike[]) => void, err?: (e: Error) => void): void;
+}): Promise<FileSystemEntryLike[]> {
+  return new Promise((resolve, reject) => {
+    const all: FileSystemEntryLike[] = [];
+    const read = () => {
+      reader.readEntries((batch) => {
+        if (!batch.length) return resolve(all);
+        all.push(...batch);
+        read();
+      }, reject);
+    };
+    read();
+  });
+}
 
 function entryFile(entry: FileSystemEntryLike): Promise<File> {
   return new Promise((resolve, reject) => entry.file(resolve, reject));
@@ -104,6 +110,10 @@ async function walkEntry(entry: FileSystemEntryLike, out: PickedFile[]): Promise
   }
 }
 
+function pathOf(f: File): string {
+  return `/${(f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name}`;
+}
+
 async function filesFromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> {
   const items = Array.from(dt.items ?? []);
   const entries: FileSystemEntryLike[] = [];
@@ -118,21 +128,13 @@ async function filesFromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> {
       null;
     if (entry) entries.push(entry);
   }
-  // No entries (e.g. Firefox file-only drop) — use the flat file list.
   if (!entries.length) {
-    return Array.from(dt.files ?? []).map((f) => ({
-      file: f,
-      path: `/${(f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name}`,
-    }));
+    return Array.from(dt.files ?? []).map((f) => ({ file: f, path: pathOf(f) }));
   }
   const out: PickedFile[] = [];
   for (const entry of entries) await walkEntry(entry, out);
-  // Fallback: entry walk found nothing (e.g. item kinds unsupported) — use flat list.
   if (!out.length && dt.files?.length) {
-    return Array.from(dt.files).map((f) => ({
-      file: f,
-      path: `/${(f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name}`,
-    }));
+    return Array.from(dt.files).map((f) => ({ file: f, path: pathOf(f) }));
   }
   return out;
 }
@@ -141,8 +143,7 @@ function groupByTopFolder(list: PickedFile[]): Map<string, PickedFile[]> {
   const groups = new Map<string, PickedFile[]>();
   for (const p of list) {
     const segs = p.path.split("/").filter(Boolean);
-    // A real folder drop looks like /MyWedding/IMG_1.jpg → top = "MyWedding".
-    // Loose files look like /IMG_1.jpg → top = "" (no folder).
+    // Real folder drop: /MyWedding/IMG_1.jpg → top "MyWedding". Loose: top "".
     const top = segs.length > 1 ? segs[0] : "";
     const g = groups.get(top) ?? [];
     g.push(p);
@@ -151,58 +152,126 @@ function groupByTopFolder(list: PickedFile[]): Map<string, PickedFile[]> {
   return groups;
 }
 
+/* ------------------------------- component ------------------------------ */
+
 export default function AlbumsPanel() {
+  /* ---- list state ---- */
   const [albums, setAlbums] = useState<Album[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [form, setForm] = useState({ title: "", couple: "", description: "", category: "wedding" as "wedding" | "portrait" });
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "wedding" | "portrait">("all");
+  const [form, setForm] = useState({
+    title: "",
+    couple: "",
+    description: "",
+    category: "wedding" as "wedding" | "portrait",
+  });
+  const [creating, setCreating] = useState(false);
+
+  /* ---- dialog state ---- */
+  const [selected, setSelected] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [info, setInfo] = useState({ title: "", couple: "", description: "" });
+  const [savingInfo, setSavingInfo] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [thumbFit, setThumbFit] = useState<"fit" | "fill">("fit");
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+
+  /* ---- uploads ---- */
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
+  const coverFileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [listDragging, setListDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const tmpId = useRef(-1); // temp ids for optimistically appended grid rows
+
+  /* ---- drive ---- */
   const [pasteUrls, setPasteUrls] = useState("");
   const [driveLink, setDriveLink] = useState("");
-  const [driveFiles, setDriveFiles] = useState<{ id: string; name: string; url: string; thumb: string }[]>([]);
+  const [driveFiles, setDriveFiles] = useState<DriveFile[]>([]);
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveKind, setDriveKind] = useState<"file" | "folder" | null>(null);
   const [driveMeta, setDriveMeta] = useState<{ foldersSeen?: number; truncated?: boolean } | null>(null);
   const [driveProgress, setDriveProgress] = useState<{ done: number; total: number } | null>(null);
   const [migrateBusy, setMigrateBusy] = useState(false);
-  const [thumbFit, setThumbFit] = useState<"fit" | "fill">("fit");
-  const [dragging, setDragging] = useState(false);
-  const [listDragging, setListDragging] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
-  const dragDepth = useRef(0);
 
-  const flash = (m: string) => {
+  /* ---- misc ---- */
+  const [msg, setMsg] = useState("");
+  const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flash = useCallback((m: string) => {
     setMsg(m);
-    setTimeout(() => setMsg(""), 4000);
-  };
+    if (msgTimer.current) clearTimeout(msgTimer.current);
+    msgTimer.current = setTimeout(() => setMsg(""), 4500);
+  }, []);
+
+  const active = useMemo(() => albums.find((a) => a.slug === selected) ?? null, [albums, selected]);
+  const visibleAlbums = useMemo(
+    () => albums.filter((a) => filter === "all" || a.category === filter),
+    [albums, filter]
+  );
+  const stats = useMemo(
+    () => ({
+      total: albums.length,
+      weddings: albums.filter((a) => a.category === "wedding").length,
+      portraits: albums.filter((a) => a.category === "portrait").length,
+      photos: albums.reduce((n, a) => n + a.count, 0),
+    }),
+    [albums]
+  );
+
+  /* ------------------------------ data layer ----------------------------- */
 
   const refresh = useCallback(async () => {
-    const r = await fetch("/api/albums");
-    if (!r.ok) return flash("Failed to load albums");
-    const d = (await r.json()) as { albums: Album[] };
-    setAlbums(d.albums);
-  }, []);
+    try {
+      const r = await fetch("/api/albums");
+      if (!r.ok) throw new Error(String(r.status));
+      const d = (await r.json()) as { albums: Album[] };
+      setAlbums(d.albums);
+    } catch {
+      flash("Failed to load albums — check your connection");
+    } finally {
+      setLoading(false);
+    }
+  }, [flash]);
 
-  const select = useCallback(async (slug: string) => {
-    setSelected(slug);
-    setModalOpen(true);
-    const r = await fetch(`/api/albums/${slug}/photos`);
-    if (r.ok) setPhotos(((await r.json()) as { photos: Photo[] }).photos);
-    else setPhotos([]);
-  }, []);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  /** Open the editor and (re)load its photos. */
+  const openAlbum = useCallback(
+    async (slug: string) => {
+      setSelected(slug);
+      setModalOpen(true);
+      setPreviewIndex(null);
+      try {
+        const r = await fetch(`/api/albums/${slug}/photos`);
+        const d = r.ok ? ((await r.json()) as { photos: Photo[] }) : null;
+        setPhotos(d?.photos ?? []);
+      } catch {
+        setPhotos([]);
+        flash("Could not load photos — check connection");
+      }
+    },
+    [flash]
+  );
+
+  // Keep the info fields in sync with the loaded album (dialog + list refreshes).
+  useEffect(() => {
+    if (!selected) return;
+    const a = albums.find((x) => x.slug === selected);
+    if (a) setInfo({ title: a.title, couple: a.couple ?? "", description: a.description ?? "" });
+  }, [selected, albums]);
 
   const closeModal = useCallback(() => {
     setModalOpen(false);
     setSelected(null);
     setPhotos([]);
-    setPasteUrls("");
     setPreviewIndex(null);
+    setPasteUrls("");
     setDriveLink("");
     setDriveFiles([]);
     setDriveKind(null);
@@ -213,7 +282,7 @@ export default function AlbumsPanel() {
     dragDepth.current = 0;
   }, []);
 
-  // Escape closes photo preview first, then the popup; lock background scroll while open.
+  // Escape closes the full preview first, then the dialog; lock background scroll.
   useEffect(() => {
     if (!modalOpen) return;
     document.body.style.overflow = "hidden";
@@ -230,28 +299,205 @@ export default function AlbumsPanel() {
     };
   }, [modalOpen, closeModal, previewIndex]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const busy = !!uploadProgress || !!driveProgress || creating || coverBusy || migrateBusy;
+
+  /* ----------------------------- album ops ------------------------------ */
 
   const createAlbum = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.title.trim()) return;
-    const r = await fetch("/api/albums", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...form, featured: false }),
-    });
-    if (r.status === 409) return flash("That slug already exists");
-    if (!r.ok) return flash("Create failed");
-    const d = (await r.json()) as { album: Album };
-    setForm({ title: "", couple: "", description: "", category: form.category });
-    await refresh();
-    void select(d.album.slug);
-    flash(`Album created in ${form.category === "portrait" ? "Portraits" : "Weddings"}`);
+    const title = form.title.trim();
+    if (!title || creating) return;
+    setCreating(true);
+    try {
+      const r = await fetch("/api/albums", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...form, title, featured: false }),
+      });
+      if (r.status === 409) return flash("That slug already exists — pick another title");
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as { error?: string };
+        return flash(d.error ?? "Create failed");
+      }
+      const d = (await r.json()) as { album: Album };
+      setForm({ title: "", couple: "", description: "", category: form.category });
+      await refresh();
+      void openAlbum(d.album.slug);
+      flash(`Created “${d.album.title}” in ${form.category === "portrait" ? "Portraits" : "Weddings"} ✓`);
+    } catch {
+      flash("Create failed — network");
+    } finally {
+      setCreating(false);
+    }
   };
 
-  // 4 parallel PUTs: fast for 200-photo wedding folders, still gentle on R2/browsers.
+  const patchAlbum = async (
+    slug: string,
+    patch: Partial<Pick<Album, "title" | "couple" | "description" | "cover" | "category" | "featured">>,
+    okMsg: string
+  ) => {
+    try {
+      const r = await fetch(`/api/albums/${slug}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as { error?: string };
+        flash(d.error ?? "Save failed");
+        return false;
+      }
+      await refresh();
+      flash(okMsg);
+      return true;
+    } catch {
+      flash("Save failed — network");
+      return false;
+    }
+  };
+
+  const saveInfo = async () => {
+    if (!selected || savingInfo) return;
+    const title = info.title.trim();
+    if (!title) return flash("Title can't be empty");
+    setSavingInfo(true);
+    await patchAlbum(selected, { title, couple: info.couple, description: info.description }, "Album info saved ✓");
+    setSavingInfo(false);
+  };
+
+  const removeAlbum = async (slug: string) => {
+    const a = albums.find((x) => x.slug === slug);
+    if (!window.confirm(`Delete “${a?.title ?? slug}” and all its photo links? The R2 files stay.`)) return;
+    try {
+      const r = await fetch(`/api/albums/${slug}`, { method: "DELETE" });
+      if (!r.ok) return flash("Delete failed");
+      if (selected === slug) closeModal();
+      await refresh();
+      flash("Album deleted");
+    } catch {
+      flash("Delete failed — network");
+    }
+  };
+
+  /* ----------------------------- photo ops ------------------------------ */
+
+  const attachUrlsToAlbum = async (slug: string, urls: string[]) => {
+    const r = await fetch(`/api/albums/${slug}/photos`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ urls }),
+    });
+    return r.ok;
+  };
+
+  const appendPhotosLocal = (urls: { url: string; caption: string | null }[]) => {
+    if (!urls.length) return;
+    setPhotos((cur) => {
+      const base = cur.length ? Math.max(...cur.map((p) => p.sort)) : 0;
+      return [
+        ...cur,
+        ...urls.map((n, i) => ({ id: tmpId.current--, url: n.url, caption: n.caption, sort: base + i + 1 })),
+      ];
+    });
+  };
+
+  const removePhoto = async (id: number) => {
+    if (!selected || id < 0) return;
+    const snapshot = photos;
+    setPhotos((cur) => cur.filter((p) => p.id !== id));
+    try {
+      const r = await fetch(`/api/albums/${selected}/photos/${id}`, { method: "DELETE" });
+      if (!r.ok) {
+        setPhotos(snapshot);
+        flash("Remove failed");
+        return;
+      }
+      await refresh();
+    } catch {
+      setPhotos(snapshot);
+      flash("Remove failed — network");
+    }
+  };
+
+  // Delete from inside the full preview — stay open on the next photo.
+  const removePhotoInPreview = async (id: number) => {
+    if (!selected || previewIndex === null) return;
+    if (!window.confirm("Delete this photo from the gallery? The R2 file stays.")) return;
+    const next = photos.filter((p) => p.id !== id);
+    try {
+      const r = await fetch(`/api/albums/${selected}/photos/${id}`, { method: "DELETE" });
+      if (!r.ok) return flash("Remove failed");
+      setPhotos(next);
+      await refresh();
+      if (!next.length) setPreviewIndex(null);
+      else setPreviewIndex(Math.min(previewIndex, next.length - 1));
+    } catch {
+      flash("Remove failed — network");
+    }
+  };
+
+  const movePhoto = async (i: number, dir: number) => {
+    if (!selected) return;
+    const j = i + dir;
+    if (j < 0 || j >= photos.length) return;
+    const next = [...photos];
+    [next[i], next[j]] = [next[j], next[i]];
+    setPhotos(next);
+    try {
+      const r = await fetch(`/api/albums/${selected}/photos`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: next.map((p) => p.id) }),
+      });
+      if (!r.ok) {
+        setPhotos(photos);
+        flash("Reorder failed");
+      }
+    } catch {
+      setPhotos(photos);
+      flash("Reorder failed — network");
+    }
+  };
+
+  const setCover = async (url: string | null) => {
+    if (!selected) return;
+    setCoverBusy(true);
+    await patchAlbum(selected, { cover: url }, url ? "Cover updated ✓" : "Cover reset to first photo ✓");
+    setCoverBusy(false);
+  };
+
+  const uploadCover = async (file?: File) => {
+    if (!file) return;
+    setCoverBusy(true);
+    try {
+      const url = await uploadToR2(file);
+      await patchAlbum(selected ?? "", { cover: url }, "Cover updated ✓");
+    } catch {
+      flash("Cover upload failed");
+    } finally {
+      setCoverBusy(false);
+      if (coverFileRef.current) coverFileRef.current.value = "";
+    }
+  };
+
+  const addPasted = async () => {
+    if (!selected) return;
+    const urls = pasteUrls
+      .split(/\s+/)
+      .map((u) => u.trim())
+      .filter((u) => /^https?:\/\//.test(u));
+    if (!urls.length) return flash("No valid URLs found");
+    const ok = await attachUrlsToAlbum(selected, urls);
+    if (!ok) return flash("Attach failed — Drive links are auto-converted, use the Drive import below");
+    setPasteUrls("");
+    appendPhotosLocal(urls.map((u) => ({ url: u, caption: null })));
+    await refresh();
+    flash(`Added ${urls.length} photo${urls.length > 1 ? "s" : ""} by URL ✓`);
+  };
+
+  /* ------------------------------- uploads ------------------------------ */
+
+  // 4 parallel presign+PUTs: fast for 200-photo folders, gentle on the browser.
   const uploadBatchToR2 = async (files: File[]): Promise<{ urls: (string | null)[]; failed: string[] }> => {
     const urls: (string | null)[] = new Array(files.length).fill(null);
     const failed: string[] = [];
@@ -275,15 +521,6 @@ export default function AlbumsPanel() {
     return { urls, failed };
   };
 
-  const attachUrlsToAlbum = async (slug: string, urls: string[]) => {
-    const r = await fetch(`/api/albums/${slug}/photos`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ urls }),
-    });
-    return r.ok;
-  };
-
   const uploadPickedToAlbum = async (slug: string, picked: PickedFile[]) => {
     const sorted = sortPicked(picked);
     const media = sorted.filter((p) => isMediaFile(p.file, p.path));
@@ -296,40 +533,31 @@ export default function AlbumsPanel() {
       );
       return;
     }
-    setBusy(true);
-    flash(`Uploading ${media.length} photo${media.length > 1 ? "s" : ""}… 0/${media.length}`);
-    const files = media.map((p) => p.file);
-    const { urls, failed } = await uploadBatchToR2(files);
-    const good = urls.filter((u): u is string => !!u);
+    flash(`Uploading ${media.length} photo${media.length > 1 ? "s" : ""}…`);
+    const { urls, failed } = await uploadBatchToR2(media.map((p) => p.file));
     setUploadProgress(null);
-    if (good.length) {
-      const ok = await attachUrlsToAlbum(slug, good);
-      if (ok) {
-        flash(
-          `Added ${good.length} photo${good.length > 1 ? "s" : ""}` +
-            (failed.length ? `, ${failed.length} failed (${failed[0].slice(0, 40)})` : "") +
-            (skipped ? `, skipped ${skipped} non-image` : "")
-        );
-        await select(slug);
-        await refresh();
-      } else flash("Upload done but attach failed");
-    } else {
+    const good = urls.filter((u): u is string => !!u);
+    if (!good.length) {
       flash(`All uploads failed${failed.length ? `: ${failed[0].slice(0, 60)}` : ""}`);
+      return;
     }
-    setBusy(false);
+    const ok = await attachUrlsToAlbum(slug, good);
+    if (!ok) return flash("Uploads done but attach failed — try again or paste the URLs");
+    appendPhotosLocal(good.map((u) => ({ url: u, caption: null })));
+    await refresh();
+    flash(
+      `Added ${good.length} photo${good.length > 1 ? "s" : ""}` +
+        (failed.length ? `, ${failed.length} failed (${failed[0].slice(0, 40)})` : "") +
+        (skipped ? `, skipped ${skipped} non-image` : "") +
+        " ✓"
+    );
   };
 
   const uploadFiles = async (files: FileList | File[] | null) => {
     if (!files || !selected) return;
-    const arr = Array.isArray(files) ? files : Array.from(files);
-    await uploadPickedToAlbum(
-      selected,
-      arr.map((f) => ({
-        file: f,
-        path: `/${(f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name}`,
-      }))
-    );
-    // Reset inputs so the same folder can be picked twice in a row.
+    const arr = Array.from(files);
+    await uploadPickedToAlbum(selected, arr.map((f) => ({ file: f, path: pathOf(f) })));
+    // Reset inputs so the same selection can be picked twice in a row.
     if (fileRef.current) fileRef.current.value = "";
     if (folderRef.current) folderRef.current.value = "";
   };
@@ -342,93 +570,64 @@ export default function AlbumsPanel() {
     await uploadPickedToAlbum(selected, picked);
   };
 
-  // Drop on the album list (no popup open) → one new gallery per folder.
+  // Drop on the album list (no dialog open) → one new gallery per folder.
   const handleListDrop = async (dt: DataTransfer) => {
     const picked = await filesFromDataTransfer(dt);
     if (!picked.length) return flash("No files found in that drop");
     const groups = groupByTopFolder(picked);
     const folders = [...groups.entries()].filter(([top]) => top !== "");
-    setBusy(true);
     try {
+      const createFor = async (title: string): Promise<Album | null> => {
+        const r = await fetch("/api/albums", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title,
+            category: filter === "portrait" ? "portrait" : "wedding",
+            featured: false,
+          }),
+        });
+        if (!r.ok) return null;
+        const d = (await r.json()) as { album: Album };
+        return d.album;
+      };
+
       if (!folders.length) {
         // Loose files — one gallery for the whole drop.
-        const title = `Dropped photos ${new Date().toLocaleDateString()}`;
-        const r = await fetch("/api/albums", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            title,
-            category: filter === "portrait" ? "portrait" : "wedding",
-            featured: false,
-          }),
-        });
-        if (!r.ok) {
-          const d = (await r.json().catch(() => null)) as { error?: string } | null;
-          flash(d?.error ?? "Create failed for dropped files");
-          return;
-        }
-        const d = (await r.json()) as { album: Album };
+        const album = await createFor(`Dropped photos ${new Date().toLocaleDateString()}`);
+        if (!album) return flash("Create failed for dropped files");
         await refresh();
-        flash(`Created “${d.album.title}” — uploading…`);
-        setBusy(false);
-        await uploadPickedToAlbum(d.album.slug, picked);
+        flash(`Created “${album.title}” — uploading…`);
+        await uploadPickedToAlbum(album.slug, picked);
         return;
       }
+
       let n = 0;
       for (const [top, files] of folders) {
-        const title = prettifyFolder(top);
-        const r = await fetch("/api/albums", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            title,
-            category: filter === "portrait" ? "portrait" : "wedding",
-            featured: false,
-          }),
-        });
-        if (!r.ok) continue;
-        const d = (await r.json()) as { album: Album };
+        const album = await createFor(prettifyFolder(top));
+        if (!album) continue;
         await refresh();
         n++;
-        flash(`Created “${d.album.title}” (${n}/${folders.length}) — uploading…`);
-        await uploadPickedToAlbum(d.album.slug, files);
+        flash(`Created “${album.title}” (${n}/${folders.length}) — uploading…`);
+        await uploadPickedToAlbum(album.slug, files);
       }
       if (n) {
         await refresh();
         flash(
           folders.length > 1
-            ? `Created ${n} galler${n > 1 ? "ies" : "y"} from ${folders.length} folders ✓`
-            : `Created gallery from folder ✓`
+            ? `Created ${n} ${n === 1 ? "gallery" : "galleries"} from ${folders.length} folders ✓`
+            : "Created gallery from folder ✓"
         );
       } else flash("Create failed for dropped folders");
+    } catch {
+      flash("Drop import failed — network");
     } finally {
-      setBusy(false);
       setUploadProgress(null);
       setListDragging(false);
     }
   };
 
-  const addPasted = async () => {
-    if (!selected) return;
-    const urls = pasteUrls
-      .split(/\s+/)
-      .map((u) => u.trim())
-      .filter((u) => /^https?:\/\//.test(u));
-    if (!urls.length) return flash("No valid URLs");
-    const r = await fetch(`/api/albums/${selected}/photos`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ urls }),
-    });
-    if (r.ok) {
-      setPasteUrls("");
-      await select(selected);
-      await refresh();
-      flash(`Added ${urls.length} by URL`);
-    } else {
-      flash("Attach failed — Drive links are auto-converted, folders use Drive import below");
-    }
-  };
+  /* --------------------------- drive → r2 import ------------------------- */
 
   const resolveDrive = async () => {
     if (!driveLink.trim()) return flash("Paste a Drive file or folder link first");
@@ -439,9 +638,9 @@ export default function AlbumsPanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: driveLink.trim() }),
       });
-      const d = (await r.json()) as {
+      const d = (await r.json().catch(() => ({}))) as {
         kind?: "file" | "folder";
-        files?: { id: string; name: string; url: string; thumb: string }[];
+        files?: DriveFile[];
         foldersSeen?: number;
         truncated?: boolean;
         error?: string;
@@ -457,11 +656,11 @@ export default function AlbumsPanel() {
       setDriveKind(d.kind ?? null);
       setDriveMeta({ foldersSeen: d.foldersSeen, truncated: d.truncated });
       const extra =
-        d.kind === "folder" && d.foldersSeen && d.foldersSeen > 1 ? ` (scanned ${d.foldersSeen} subfolders)` : "";
+        d.kind === "folder" && d.foldersSeen && d.foldersSeen > 1 ? ` across ${d.foldersSeen} subfolders` : "";
       const trunc = d.truncated ? " — list capped at 1000, import in parts" : "";
       flash(
         d.files?.length
-          ? `Found ${d.files.length} image${d.files.length > 1 ? "s" : ""} in Drive${extra}${trunc} — stored as permanent R2 copies`
+          ? `Found ${d.files.length} image${d.files.length > 1 ? "s" : ""}${extra}${trunc} — they'll be stored as permanent R2 copies`
           : "No images found in that Drive link (check sharing: Anyone with the link → Viewer)"
       );
     } catch {
@@ -471,26 +670,31 @@ export default function AlbumsPanel() {
     }
   };
 
-  // Drive → R2: download bytes server-side, store permanent R2 copies, attach to album.
-  // Drive lh3 URLs are never stored — they 403/quota-throttle and break galleries.
-  // Speed: 3 workers × 6-id chunks run concurrently (≈9 files in flight; the server
-  // copies 4 per request). Each id gets one attempt per run; imported photos are
-  // appended to the grid locally (no per-batch album refetch — one at the end).
-  // Resume: anything not imported stays listed — click Copy again, server skips
-  // what's already there, so retries never duplicate.
+  const clearDrive = () => {
+    setDriveFiles([]);
+    setDriveLink("");
+    setDriveKind(null);
+    setDriveMeta(null);
+    setDriveProgress(null);
+  };
+
+  /**
+   * Copy Drive files into R2 and attach them. Speed: 3 workers × 6-id chunks
+   * run concurrently (≈9 files in flight; the server copies 4 per request).
+   * Each id gets one attempt per run; anything not imported stays listed, so
+   * clicking Copy again resumes — the server skips what's already there.
+   */
   const importDrive = async () => {
-    if (!selected || !driveFiles.length) return;
-    setBusy(true);
+    if (!selected || !driveFiles.length || !!driveProgress) return;
     const nameOf = (id: string) => driveFiles.find((f) => f.id === id)?.name ?? id.slice(0, 8);
-    const BATCH = 6; // small batches: wedding files are 10-20MB, keeps each request well under 120s
-    const WORKERS = 3; // concurrent requests → up to 9 files in flight
+    const BATCH = 6;
+    const WORKERS = 3;
     const total = driveFiles.length;
     const queue = driveFiles.map((f) => f.id);
-    const remaining = new Set<string>(); // failed / not-accounted ids → stay listed for resume
+    const remaining = new Set<string>();
     let importedTotal = 0;
     let skippedTotal = 0;
     let doneCount = 0;
-    let tmpId = -1; // temp ids for grid rows appended before the final refetch
     const errors: string[] = [];
     setDriveProgress({ done: 0, total });
 
@@ -505,7 +709,7 @@ export default function AlbumsPanel() {
       const finished = new Set<string>(); // imported/skipped → drop from the list
       const processed = new Set<string>(); // attempted → counts toward progress
       try {
-        const r = await fetch(`/api/drive/import-to-r2`, {
+        const r = await fetch("/api/drive/import-to-r2", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ albumSlug: selected, fileIds: ids }),
@@ -536,18 +740,8 @@ export default function AlbumsPanel() {
         }
         doneIds.forEach((id) => finished.add(id));
         [...doneIds, ...failedIds].forEach((id) => processed.add(id));
-        // Grid update without refetch: append the permanent R2 copies now; the
-        // final select() swaps temp ids for real rows.
-        const news = (d.imported ?? []).map((x) => ({ url: x.r2Url, caption: x.name }));
-        if (news.length) {
-          setPhotos((cur) => {
-            const base = cur.length ? Math.max(...cur.map((p) => p.sort)) : 0;
-            return [
-              ...cur,
-              ...news.map((n, i) => ({ id: tmpId--, url: n.url, caption: n.caption, sort: base + i + 1 })),
-            ];
-          });
-        }
+        // Append the permanent R2 copies now; the final reconcile swaps temp ids.
+        appendPhotosLocal((d.imported ?? []).map((x) => ({ url: x.r2Url, caption: x.name })));
       } catch {
         ids.forEach((id) => remaining.add(id));
         errors.push("network failed — copied files are kept, click Copy again to resume");
@@ -562,10 +756,7 @@ export default function AlbumsPanel() {
     };
 
     const worker = async () => {
-      while (queue.length) {
-        const ids = queue.splice(0, BATCH);
-        await runChunk(ids);
-      }
+      while (queue.length) await runChunk(queue.splice(0, BATCH));
     };
     await Promise.all(Array.from({ length: WORKERS }, () => worker()));
 
@@ -573,14 +764,12 @@ export default function AlbumsPanel() {
     if (!remaining.size) {
       flash(
         `Stored ${importedTotal} permanent R2 cop${importedTotal === 1 ? "y" : "ies"}` +
-          (skippedTotal ? `, ${skippedTotal} already in gallery` : "") +
-          (errors.length ? `, ${errors.length} failed: ${errors[errors.length - 1].slice(0, 110)}` : "")
+          (skippedTotal ? `, ${skippedTotal} already in the gallery` : "") +
+          (errors.length ? `, ${errors.length} failed: ${errors[errors.length - 1].slice(0, 110)}` : "") +
+          " ✓"
       );
-      setDriveFiles([]);
-      setDriveLink("");
-      setDriveKind(null);
-      setDriveMeta(null);
-      await select(selected); // one refetch swaps temp grid rows for real ids
+      clearDrive();
+      await openAlbum(selected); // one refetch swaps temp grid rows for real ids
       await refresh();
     } else {
       flash(
@@ -589,26 +778,27 @@ export default function AlbumsPanel() {
       );
       await refresh();
     }
-    setBusy(false);
   };
 
   // One-click fix for galleries created before R2 copy existed (lh3 URLs → R2).
   const migrateDrivePhotos = async () => {
-    if (!selected) return;
-    const driveOnes = photos.filter((p) => p.url.includes("googleusercontent") || p.url.includes("drive.google"));
-    if (!driveOnes.length) return flash("No Drive URLs left in this gallery — all on R2 ✓");
+    if (!selected || migrateBusy) return;
+    const driveCount = photos.filter(
+      (p) => p.url.includes("googleusercontent") || p.url.includes("drive.google")
+    ).length;
+    if (!driveCount) return flash("No Drive URLs left in this gallery — all on R2 ✓");
     setMigrateBusy(true);
     let migratedTotal = 0;
-    let remaining = driveOnes.length;
+    let remaining = driveCount;
     try {
       while (remaining > 0) {
-        flash(`Moving old Drive photos to R2… ${migratedTotal}/${driveOnes.length}`);
+        flash(`Moving old Drive photos to R2… ${migratedTotal}/${driveCount}`);
         const r = await fetch(`/api/albums/${selected}/migrate-to-r2`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ limit: 10 }),
         });
-        const d = (await r.json()) as {
+        const d = (await r.json().catch(() => ({}))) as {
           migrated?: unknown[];
           failed?: { error: string }[];
           remaining?: number;
@@ -620,15 +810,19 @@ export default function AlbumsPanel() {
         }
         migratedTotal += d.migrated?.length ?? 0;
         remaining = d.remaining ?? 0;
-        await select(selected);
+        await openAlbum(selected);
         if (!d.migrated?.length) {
-          if ((d.failed?.length ?? 0) > 0) flash(`Stopped: ${d.failed![0].error.slice(0, 120)}`);
+          if (d.failed?.length) flash(`Stopped: ${d.failed[0].error.slice(0, 120)}`);
           break;
         }
-        if (migratedTotal >= driveOnes.length + 20) break; // safety
+        if (migratedTotal >= driveCount + 20) break; // safety
       }
       await refresh();
-      flash(remaining === 0 ? `All Drive photos now on R2 ✓ (${migratedTotal})` : `Moved ${migratedTotal} to R2, ${remaining} left`);
+      flash(
+        remaining === 0
+          ? `All Drive photos now on R2 ✓ (${migratedTotal} moved)`
+          : `Moved ${migratedTotal} to R2, ${remaining} left — click again to continue`
+      );
     } catch {
       flash("Migrate failed — network");
     } finally {
@@ -636,141 +830,30 @@ export default function AlbumsPanel() {
     }
   };
 
-  const removePhoto = async (id: number) => {
-    if (!selected) return;
-    await fetch(`/api/albums/${selected}/photos/${id}`, { method: "DELETE" });
-    await select(selected);
-    await refresh();
-  };
+  /* -------------------------------- render ------------------------------- */
 
-  // Delete from inside the full preview popup — stay open on the next photo.
-  const removePhotoInPreview = async (id: number) => {
-    if (!selected || previewIndex === null) return;
-    if (!window.confirm("Delete this photo from the gallery? R2 file stays.")) return;
-    await fetch(`/api/albums/${selected}/photos/${id}`, { method: "DELETE" });
-    const r = await fetch(`/api/albums/${selected}/photos`);
-    const next = r.ok ? (((await r.json()) as { photos: Photo[] }).photos ?? []) : photos.filter((p) => p.id !== id);
-    setPhotos(next);
-    await refresh();
-    if (!next.length) setPreviewIndex(null);
-    else setPreviewIndex(Math.min(previewIndex, next.length - 1));
-  };
-
-  const movePhoto = async (i: number, d: number) => {
-    if (!selected) return;
-    const ids = photos.map((p) => p.id);
-    const j = i + d;
-    if (ids[j] === undefined) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    await fetch(`/api/albums/${selected}/photos`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ids }),
-    });
-    await select(selected);
-  };
-
-  const removeAlbum = async (slug: string) => {
-    if (!window.confirm(`Delete album "${slug}" and all its photo links? R2 files stay.`)) return;
-    await fetch(`/api/albums/${slug}`, { method: "DELETE" });
-    if (selected === slug) {
-      closeModal();
-    }
-    await refresh();
-    flash("Album deleted");
-  };
-
-  const [coverBusy, setCoverBusy] = useState(false);
-  const coverFileRef = useRef<HTMLInputElement>(null);
-
-  const setCover = async (url: string | null) => {
-    if (!selected) return;
-    setCoverBusy(true);
-    const r = await fetch(`/api/albums/${selected}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cover: url }),
-    });
-    flash(r.ok ? (url ? "Cover updated" : "Cover reset to first photo") : "Cover save failed");
-    if (r.ok) await refresh();
-    setCoverBusy(false);
-  };
-
-  const uploadCover = async (file?: File) => {
-    if (!file) return;
-    setCoverBusy(true);
-    try {
-      await setCover(await uploadToR2(file));
-    } catch {
-      flash("Cover upload failed");
-      setCoverBusy(false);
-    }
-  };
-
-  const active = albums.find((a) => a.slug === selected);
-
-  const setCategory = async (category: "wedding" | "portrait") => {
-    if (!selected) return;
-    const r = await fetch(`/api/albums/${selected}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ category }),
-    });
-    flash(r.ok ? `Moved to ${category === "portrait" ? "Portraits" : "Weddings"}` : "Move failed");
-    if (r.ok) await refresh();
-  };
-
-  const toggleFeatured = async () => {
-    if (!selected || !active) return;
-    const r = await fetch(`/api/albums/${selected}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ featured: !active.featured }),
-    });
-    flash(r.ok ? (!active.featured ? "★ Featured on home" : "Removed from home featured") : "Save failed");
-    if (r.ok) await refresh();
-  };
-
-  const [info, setInfo] = useState({ title: "", description: "" });
-  useEffect(() => {
-    const a = albums.find((x) => x.slug === selected);
-    setInfo({ title: a?.title ?? "", description: a?.description ?? "" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, albums]);
-
-  const saveInfo = async () => {
-    if (!selected) return;
-    const r = await fetch(`/api/albums/${selected}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: info.title, description: info.description }),
-    });
-    flash(r.ok ? "Album info saved" : "Save failed");
-    if (r.ok) await refresh();
-  };
+  const legacyDrivePhotos = photos.filter(
+    (p) => p.url.includes("googleusercontent") || p.url.includes("drive.google")
+  );
 
   return (
     <section
       className={`db-sec db-sec-open db-albums${listDragging ? " db-drop-active" : ""}`}
       onDragEnter={(e) => {
-        if (modalOpen) return;
-        if (!e.dataTransfer.types.includes("Files")) return;
+        if (modalOpen || !e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
         setListDragging(true);
       }}
       onDragOver={(e) => {
-        if (modalOpen) return;
-        if (!e.dataTransfer.types.includes("Files")) return;
+        if (modalOpen || !e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
       }}
       onDragLeave={(e) => {
-        if (modalOpen) return;
-        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+        if (modalOpen || e.currentTarget.contains(e.relatedTarget as Node)) return;
         setListDragging(false);
       }}
       onDrop={(e) => {
-        if (modalOpen) return;
-        if (!e.dataTransfer.types.includes("Files")) return;
+        if (modalOpen || !e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
         setListDragging(false);
         void handleListDrop(e.dataTransfer);
@@ -780,105 +863,158 @@ export default function AlbumsPanel() {
         <span>Albums — Weddings &amp; Portraits</span>
         {msg && <em className="db-albums-msg">{msg}</em>}
       </div>
+
       <div className="db-sec-body">
-        <p className="db-albums-hint">
-          <strong>Wedding</strong> albums show at <code>/weddings</code> + home Weddings;{" "}
-          <strong>Portrait</strong> albums show at <code>/portraits</code> + home Portraits.{" "}
-          <strong>★ Featured</strong> albums also show in the home Gallery. Click a cover card to open{" "}
-          <code>/weddings/&lt;slug&gt;</code> or <code>/portraits/&lt;slug&gt;</code>.
-        </p>
+        {loading ? (
+          <p className="db-albums-hint">Loading albums…</p>
+        ) : (
+          <>
+            {/* stats */}
+            <div className="db-album-stats">
+              <span className="db-stat">
+                <strong>{stats.total}</strong> albums
+              </span>
+              <span className="db-stat">
+                <strong>{stats.weddings}</strong> weddings
+              </span>
+              <span className="db-stat">
+                <strong>{stats.portraits}</strong> portraits
+              </span>
+              <span className="db-stat">
+                <strong>{stats.photos}</strong> photos
+              </span>
+            </div>
 
-        <div className="db-row" style={{ marginBottom: 10 }}>
-          {(["all", "wedding", "portrait"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`db-btn db-btn-sm${filter === f ? " db-btn-active" : ""}`}
-              onClick={() => setFilter(f)}
-            >
-              {f === "all" ? `All (${albums.length})` : f === "wedding" ? `Weddings (${albums.filter((a) => a.category === "wedding").length})` : `Portraits (${albums.filter((a) => a.category === "portrait").length})`}
-            </button>
-          ))}
-        </div>
+            <p className="db-albums-hint">
+              <strong>Wedding</strong> albums show at <code>/weddings</code> + home Weddings;{" "}
+              <strong>Portrait</strong> albums show at <code>/portraits</code> + home Portraits.{" "}
+              <strong>★ Featured</strong> albums also show in the home Gallery.
+            </p>
 
-        <form className="db-albums-new" onSubmit={createAlbum}>
-          <input
-            className="db-input"
-            placeholder="Title — e.g. Priya + Arjun / Ananya — Portraits"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-          />
-          <div className="db-row">
-            <select
-              className="db-input"
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value as "wedding" | "portrait" })}
-              aria-label="Album category"
-            >
-              <option value="wedding">Wedding</option>
-              <option value="portrait">Portrait</option>
-            </select>
-            <input
-              className="db-input"
-              placeholder="Names (optional)"
-              value={form.couple}
-              onChange={(e) => setForm({ ...form, couple: e.target.value })}
-            />
-            <input
-              className="db-input"
-              placeholder="Description (optional)"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-            <button type="submit" className="db-btn db-btn-sm" disabled={!form.title.trim()}>
-              + Create
-            </button>
-          </div>
-        </form>
-
-        <div className="db-albums-list">
-          {albums
-            .filter((a) => filter === "all" || a.category === filter)
-            .map((a) => (
-              <div key={a.slug} className="db-album-row">
-                {a.cover && <img className="db-album-thumb" src={a.cover} alt="" loading="lazy" />}
-                <button type="button" className="db-album-name" onClick={() => void select(a.slug)} title="Click to edit in popup">
-                  {a.featured ? "★ " : ""}[{a.category === "portrait" ? "P" : "W"}] {a.title}{" "}
-                  <em className="db-count">{a.count}</em>
+            {/* filter tabs */}
+            <div className="db-row" style={{ marginBottom: 10 }}>
+              {(["all", "wedding", "portrait"] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`db-btn db-btn-sm${filter === f ? " db-btn-active" : ""}`}
+                  onClick={() => setFilter(f)}
+                >
+                  {f === "all"
+                    ? `All (${stats.total})`
+                    : f === "wedding"
+                      ? `Weddings (${stats.weddings})`
+                      : `Portraits (${stats.portraits})`}
                 </button>
-                <em className="db-album-slug">
-                  /{a.category === "portrait" ? "portraits" : "weddings"}/{a.slug}
-                </em>
-                <button type="button" className="db-btn db-btn-sm" onClick={() => void select(a.slug)}>
-                  Edit
-                </button>
-                <button type="button" className="db-mini db-mini-del" onClick={() => void removeAlbum(a.slug)} aria-label={`Delete ${a.title}`}>
-                  ✕
+              ))}
+            </div>
+
+            {/* create form */}
+            <form className="db-albums-new" onSubmit={(e) => void createAlbum(e)}>
+              <input
+                className="db-input"
+                placeholder="Title — e.g. Priya + Arjun / Ananya — Portraits"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+              <div className="db-row">
+                <select
+                  className="db-input"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value as "wedding" | "portrait" })}
+                  aria-label="Album category"
+                >
+                  <option value="wedding">Wedding</option>
+                  <option value="portrait">Portrait</option>
+                </select>
+                <input
+                  className="db-input"
+                  placeholder="Names (optional)"
+                  value={form.couple}
+                  onChange={(e) => setForm({ ...form, couple: e.target.value })}
+                />
+                <input
+                  className="db-input"
+                  placeholder="Description (optional)"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
+                <button type="submit" className="db-btn db-btn-sm" disabled={!form.title.trim() || creating}>
+                  {creating ? "Creating…" : "+ Create"}
                 </button>
               </div>
-            ))}
-          {albums.filter((a) => filter === "all" || a.category === filter).length === 0 && (
-            <p className="db-albums-hint">No albums here yet — create one above.</p>
-          )}
-        </div>
-        <div className={`db-dropzone${listDragging ? " db-dropzone-on" : ""}`}>
-          <span>
-            {listDragging
-              ? "Drop to create gallery — one per folder, named after the folder 📁"
-              : "Tip: drag a folder from your PC here — one gallery per folder, auto-named. Or drop files to make a single gallery."}
-          </span>
-          {uploadProgress && !modalOpen && (
-            <span className="db-progress">
-              <i style={{ width: `${Math.round((uploadProgress.done / Math.max(1, uploadProgress.total)) * 100)}%` }} />
-              <em>
-                {uploadProgress.done}/{uploadProgress.total}
-              </em>
-            </span>
-          )}
-        </div>
-        <p className="db-albums-hint">Tip: click a gallery name or Edit to open the popup editor.</p>
+            </form>
+
+            {/* album list */}
+            <div className="db-albums-list">
+              {visibleAlbums.map((a) => (
+                <div key={a.slug} className="db-album-row">
+                  {(a.cover ?? a.coverUrl) && (
+                    <img className="db-album-thumb" src={a.cover ?? a.coverUrl ?? ""} alt="" loading="lazy" />
+                  )}
+                  <button
+                    type="button"
+                    className="db-album-name"
+                    onClick={() => void openAlbum(a.slug)}
+                    title="Click to edit in popup"
+                  >
+                    <span className={`db-badge${a.category === "portrait" ? " db-badge-p" : ""}`}>
+                      {a.category === "portrait" ? "Portrait" : "Wedding"}
+                    </span>
+                    {a.featured ? "★ " : ""}
+                    {a.title} <em className="db-count">{a.count}</em>
+                  </button>
+                  <a
+                    className="db-album-slug"
+                    href={`/${a.category === "portrait" ? "portraits" : "weddings"}/${a.slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open live gallery"
+                  >
+                    /{a.category === "portrait" ? "portraits" : "weddings"}/{a.slug} ↗
+                  </a>
+                  <button type="button" className="db-btn db-btn-sm" onClick={() => void openAlbum(a.slug)}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="db-mini db-mini-del"
+                    onClick={() => void removeAlbum(a.slug)}
+                    aria-label={`Delete ${a.title}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {visibleAlbums.length === 0 && (
+                <p className="db-albums-hint">
+                  No {filter === "wedding" ? "wedding" : filter === "portrait" ? "portrait" : ""} albums here yet —
+                  create one above.
+                </p>
+              )}
+            </div>
+
+            {/* list dropzone */}
+            <div className={`db-dropzone${listDragging ? " db-dropzone-on" : ""}`}>
+              <span>
+                {listDragging
+                  ? "Drop to create galleries — one per folder, named after the folder 📁"
+                  : "Tip: drag a folder from your PC here — one gallery per folder, auto-named. Or drop files to make a single gallery."}
+              </span>
+              {uploadProgress && !modalOpen && (
+                <span className="db-progress" role="status" aria-live="polite">
+                  <i style={{ width: `${Math.round((uploadProgress.done / Math.max(1, uploadProgress.total)) * 100)}%` }} />
+                  <em>
+                    {uploadProgress.done}/{uploadProgress.total}
+                  </em>
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
+      {/* ------------------------------ editor ------------------------------ */}
       {modalOpen && active && (
         <div
           className="db-modal-overlay"
@@ -914,17 +1050,23 @@ export default function AlbumsPanel() {
               if (e.dataTransfer.types.includes("Files")) void handleModalDrop(e.dataTransfer);
             }}
           >
+            {/* head */}
             <div className="db-modal-head">
               <div className="db-modal-title">
-                {active.cover && <img className="db-modal-cover" src={active.cover} alt="" />}
+                {(active.cover ?? active.coverUrl) && (
+                  <img className="db-modal-cover" src={active.cover ?? active.coverUrl ?? ""} alt="" />
+                )}
                 <div>
                   <strong>
-                    {active.title} [{active.category === "portrait" ? "Portrait" : "Wedding"}]
-                    {active.featured ? " ★" : ""}
+                    {active.featured ? "★ " : ""}
+                    {active.title}
                   </strong>
+                  <span className={`db-badge${active.category === "portrait" ? " db-badge-p" : ""}`}>
+                    {active.category === "portrait" ? "Portrait" : "Wedding"}
+                  </span>
                   <span className="db-modal-sub">
-                    /{active.category === "portrait" ? "portraits" : "weddings"}/{active.slug} · {photos.length}{" "}
-                    {photos.length === 1 ? "photo" : "photos"} ·{" "}
+                    /{active.category === "portrait" ? "portraits" : "weddings"}/{active.slug} ·{" "}
+                    {photos.length} {photos.length === 1 ? "photo" : "photos"} ·{" "}
                     <a
                       href={`/${active.category === "portrait" ? "portraits" : "weddings"}/${active.slug}`}
                       target="_blank"
@@ -942,25 +1084,47 @@ export default function AlbumsPanel() {
             </div>
 
             <div className="db-modal-body">
+              {/* actions */}
               <div className="db-modal-actions">
                 <button
                   type="button"
                   className="db-btn db-btn-sm"
-                  onClick={() => void setCategory(active.category === "portrait" ? "wedding" : "portrait")}
+                  onClick={() =>
+                    void patchAlbum(
+                      active.slug,
+                      { category: active.category === "portrait" ? "wedding" : "portrait" },
+                      `Moved to ${active.category === "portrait" ? "Weddings" : "Portraits"} ✓`
+                    )
+                  }
                 >
                   → Move to {active.category === "portrait" ? "Weddings" : "Portraits"}
                 </button>
-                <button type="button" className="db-btn db-btn-sm" onClick={() => void toggleFeatured()}>
+                <button
+                  type="button"
+                  className="db-btn db-btn-sm"
+                  onClick={() =>
+                    void patchAlbum(
+                      active.slug,
+                      { featured: !active.featured },
+                      active.featured ? "Removed from home featured" : "★ Featured on home ✓"
+                    )
+                  }
+                >
                   {active.featured ? "☆ Unfeature" : "★ Feature on home"}
                 </button>
-                <button type="button" className="db-btn db-btn-sm db-btn-primary" onClick={() => void saveInfo()}>
-                  Save info
+                <button
+                  type="button"
+                  className="db-btn db-btn-sm db-btn-primary"
+                  disabled={savingInfo}
+                  onClick={() => void saveInfo()}
+                >
+                  {savingInfo ? "Saving…" : "Save info"}
                 </button>
                 <button type="button" className="db-btn db-btn-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
-                  {busy ? "Uploading…" : "⬆ Upload photos"}
+                  {uploadProgress ? "Uploading…" : "⬆ Upload photos"}
                 </button>
                 <button type="button" className="db-btn db-btn-sm" disabled={busy} onClick={() => folderRef.current?.click()}>
-                  {busy ? "Uploading…" : "📁 Upload folder"}
+                  📁 Upload folder
                 </button>
                 <input
                   ref={fileRef}
@@ -980,22 +1144,21 @@ export default function AlbumsPanel() {
                   onChange={(e) => void uploadFiles(e.target.files)}
                 />
               </div>
+
               <p className="db-albums-hint" style={{ margin: 0 }}>
                 Or drag &amp; drop files or a whole folder from your PC anywhere in this popup — subfolders included,
                 sorted by name.
               </p>
+
               {uploadProgress && (
                 <div className="db-progress" role="status" aria-live="polite">
-                  <i
-                    style={{
-                      width: `${Math.round((uploadProgress.done / Math.max(1, uploadProgress.total)) * 100)}%`,
-                    }}
-                  />
+                  <i style={{ width: `${Math.round((uploadProgress.done / Math.max(1, uploadProgress.total)) * 100)}%` }} />
                   <em>
                     Uploading {uploadProgress.done}/{uploadProgress.total}…
                   </em>
                 </div>
               )}
+
               {dragging && (
                 <div className="db-drop-overlay" aria-hidden>
                   <strong>Drop to add to “{active.title}”</strong>
@@ -1003,6 +1166,7 @@ export default function AlbumsPanel() {
                 </div>
               )}
 
+              {/* info */}
               <div className="db-row">
                 <input
                   className="db-input"
@@ -1013,6 +1177,13 @@ export default function AlbumsPanel() {
                 />
                 <input
                   className="db-input"
+                  value={info.couple}
+                  onChange={(e) => setInfo({ ...info, couple: e.target.value })}
+                  placeholder="Names (optional)"
+                  aria-label="Names"
+                />
+                <input
+                  className="db-input"
                   value={info.description}
                   onChange={(e) => setInfo({ ...info, description: e.target.value })}
                   placeholder="Description (shown on gallery page)"
@@ -1020,22 +1191,42 @@ export default function AlbumsPanel() {
                 />
               </div>
 
+              {/* cover */}
               <div className="db-cover-row">
-                {active.cover && <img className="db-cover-thumb" src={active.cover} alt="Gallery cover" />}
+                {(active.cover ?? active.coverUrl) && (
+                  <img className="db-cover-thumb" src={active.cover ?? active.coverUrl ?? ""} alt="Gallery cover" />
+                )}
                 <div className="db-cover-actions">
-                  <strong className="db-label">Cover — first photo is default, ★ on any photo to override</strong>
+                  <strong className="db-label">Cover — first photo is default, ★ any photo to override</strong>
                   <span className="db-item-actions">
-                    <button type="button" className="db-btn db-btn-sm" disabled={coverBusy} onClick={() => coverFileRef.current?.click()}>
+                    <button
+                      type="button"
+                      className="db-btn db-btn-sm"
+                      disabled={coverBusy}
+                      onClick={() => coverFileRef.current?.click()}
+                    >
                       {coverBusy ? "Working…" : "⬆ Upload cover"}
                     </button>
-                    <button type="button" className="db-btn db-btn-sm" disabled={coverBusy || !active.coverUrl} onClick={() => void setCover(null)}>
+                    <button
+                      type="button"
+                      className="db-btn db-btn-sm"
+                      disabled={coverBusy || !active.cover}
+                      onClick={() => void setCover(null)}
+                    >
                       Use first photo
                     </button>
                   </span>
-                  <input ref={coverFileRef} type="file" accept="image/*" hidden onChange={(e) => void uploadCover(e.target.files?.[0])} />
+                  <input
+                    ref={coverFileRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={(e) => void uploadCover(e.target.files?.[0])}
+                  />
                 </div>
               </div>
 
+              {/* grid */}
               <div className="db-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                 <span className="db-albums-hint" style={{ margin: 0 }}>
                   {photos.length} photo{photos.length === 1 ? "" : "s"} — click any photo for full view
@@ -1073,16 +1264,27 @@ export default function AlbumsPanel() {
                     <span className="db-photo-num">{i + 1}</span>
                     <figcaption>
                       <button type="button" className="db-mini" onClick={() => setPreviewIndex(i)} aria-label="Open full preview" title="Full preview">⤢</button>
-                      <button type="button" className="db-mini" disabled={i === 0} onClick={() => void movePhoto(i, -1)} aria-label="Move earlier">↑</button>
-                      <button type="button" className="db-mini" disabled={i === photos.length - 1} onClick={() => void movePhoto(i, 1)} aria-label="Move later">↓</button>
-                      <button type="button" className={`db-mini ${p.url === active.coverUrl ? "db-mini-cover-on" : ""}`} disabled={coverBusy} title="Set as gallery cover" onClick={() => void setCover(p.url)}>★</button>
-                      <button type="button" className="db-mini db-mini-del" onClick={() => void removePhoto(p.id)} aria-label="Remove photo">✕</button>
+                      <button type="button" className="db-mini" disabled={i === 0} onClick={() => void movePhoto(i, -1)} aria-label="Move earlier" title="Move earlier">↑</button>
+                      <button type="button" className="db-mini" disabled={i === photos.length - 1} onClick={() => void movePhoto(i, 1)} aria-label="Move later" title="Move later">↓</button>
+                      <button
+                        type="button"
+                        className={`db-mini ${p.url === (active.cover ?? active.coverUrl) ? "db-mini-cover-on" : ""}`}
+                        disabled={coverBusy}
+                        title="Set as gallery cover"
+                        onClick={() => void setCover(p.url)}
+                      >
+                        ★
+                      </button>
+                      <button type="button" className="db-mini db-mini-del" disabled={p.id < 0} onClick={() => void removePhoto(p.id)} aria-label="Remove photo" title="Remove">✕</button>
                     </figcaption>
                   </figure>
                 ))}
-                {photos.length === 0 && <p className="db-albums-hint">No photos yet — upload above or paste URLs below.</p>}
+                {photos.length === 0 && (
+                  <p className="db-albums-hint">No photos yet — upload above, drop files here, or use the Drive import below.</p>
+                )}
               </div>
 
+              {/* paste urls */}
               <label className="db-field">
                 <span className="db-label">Add photos by URL (space/newline separated)</span>
                 <textarea
@@ -1097,28 +1299,31 @@ export default function AlbumsPanel() {
                 </button>
               </label>
 
+              {/* drive → r2 */}
               <div className="db-field" style={{ border: "1px dashed var(--db-line)", borderRadius: 8, padding: 10 }}>
-                <span className="db-label">Google Drive → R2 import — paste public file or folder link</span>
+                <span className="db-label">Google Drive → R2 import — paste a public file or folder link</span>
                 <span className="db-albums-hint" style={{ margin: 0 }}>
-                  Share in Drive → Anyone with the link → Viewer, then paste here. Subfolders are scanned too. Files are
-                  copied into permanent R2 storage — Drive links are never kept, so galleries never break.
+                  Share in Drive → Anyone with the link → Viewer, then paste here. Subfolders are scanned too. Files
+                  are copied into permanent R2 storage — Drive links are never kept, so galleries never break.
                 </span>
-                {photos.some((p) => p.url.includes("googleusercontent") || p.url.includes("drive.google")) && (
+
+                {legacyDrivePhotos.length > 0 && (
                   <div className="db-row" style={{ marginTop: 6 }}>
                     <span className="db-albums-hint" style={{ margin: 0 }}>
-                      ⚠ {photos.filter((p) => p.url.includes("googleusercontent") || p.url.includes("drive.google")).length} old
-                      Drive-linked photo(s) will break — move them to R2:
+                      ⚠ {legacyDrivePhotos.length} old Drive-linked photo{legacyDrivePhotos.length > 1 ? "s" : ""} will
+                      break — move them to R2:
                     </span>
                     <button
                       type="button"
                       className="db-btn db-btn-sm db-btn-primary"
-                      disabled={migrateBusy || busy}
+                      disabled={migrateBusy || !!driveProgress}
                       onClick={() => void migrateDrivePhotos()}
                     >
                       {migrateBusy ? "Moving…" : "⇩ Move old Drive photos to R2"}
                     </button>
                   </div>
                 )}
+
                 <div className="db-row">
                   <input
                     className="db-input"
@@ -1127,20 +1332,33 @@ export default function AlbumsPanel() {
                     placeholder="https://drive.google.com/drive/folders/… or /file/d/…"
                     aria-label="Google Drive link"
                   />
-                  <button type="button" className="db-btn db-btn-sm" disabled={!driveLink.trim() || driveBusy} onClick={() => void resolveDrive()}>
+                  <button
+                    type="button"
+                    className="db-btn db-btn-sm"
+                    disabled={!driveLink.trim() || driveBusy || !!driveProgress}
+                    onClick={() => void resolveDrive()}
+                  >
                     {driveBusy ? "Reading…" : "Check Drive"}
                   </button>
                 </div>
+
                 {driveProgress && (
-                  <span className="db-albums-hint">
-                    Copying Drive → R2: {driveProgress.done}/{driveProgress.total}…
-                  </span>
+                  <div className="db-progress" role="status" aria-live="polite">
+                    <i style={{ width: `${Math.round((driveProgress.done / Math.max(1, driveProgress.total)) * 100)}%` }} />
+                    <em>
+                      Copying Drive → R2 {driveProgress.done}/{driveProgress.total}…
+                    </em>
+                  </div>
                 )}
+
                 {driveFiles.length > 0 && (
                   <>
                     <span className="db-albums-hint">
-                      {driveKind === "folder" ? "Folder" : "File"} → {driveFiles.length} image{driveFiles.length > 1 ? "s" : ""} ready
-                      {driveMeta?.foldersSeen && driveMeta.foldersSeen > 1 ? ` (found across ${driveMeta.foldersSeen} folders)` : ""}
+                      {driveKind === "folder" ? "Folder" : "File"} → {driveFiles.length} image
+                      {driveFiles.length > 1 ? "s" : ""} ready
+                      {driveMeta?.foldersSeen && driveMeta.foldersSeen > 1
+                        ? ` (found across ${driveMeta.foldersSeen} folders)`
+                        : ""}
                       {driveMeta?.truncated ? " — capped at 1000, import then re-check for more" : ""}
                     </span>
                     <div className="db-album-grid" style={{ maxHeight: 180 }}>
@@ -1154,20 +1372,17 @@ export default function AlbumsPanel() {
                       <span className="db-albums-hint">+ {driveFiles.length - 24} more — all will be copied to R2</span>
                     )}
                     <div className="db-row">
-                      <button type="button" className="db-btn db-btn-sm db-btn-primary" disabled={busy} onClick={() => void importDrive()}>
-                        {busy ? `Copying to R2…${driveProgress ? ` ${driveProgress.done}/${driveProgress.total}` : ""}` : `⇩ Copy ${driveFiles.length} to R2 gallery`}
-                      </button>
                       <button
                         type="button"
-                        className="db-btn db-btn-sm"
-                        onClick={() => {
-                          setDriveFiles([]);
-                          setDriveLink("");
-                          setDriveKind(null);
-                          setDriveMeta(null);
-                          setDriveProgress(null);
-                        }}
+                        className="db-btn db-btn-sm db-btn-primary"
+                        disabled={!!driveProgress}
+                        onClick={() => void importDrive()}
                       >
+                        {driveProgress
+                          ? `Copying… ${driveProgress.done}/${driveProgress.total}`
+                          : `⇩ Copy ${driveFiles.length} to R2 gallery`}
+                      </button>
+                      <button type="button" className="db-btn db-btn-sm" disabled={!!driveProgress} onClick={clearDrive}>
                         Clear
                       </button>
                     </div>
@@ -1176,6 +1391,7 @@ export default function AlbumsPanel() {
               </div>
             </div>
 
+            {/* foot */}
             <div className="db-modal-foot">
               <button
                 type="button"
@@ -1191,12 +1407,13 @@ export default function AlbumsPanel() {
                 <button
                   type="button"
                   className="db-btn db-btn-sm db-btn-primary"
+                  disabled={savingInfo}
                   onClick={async () => {
                     await saveInfo();
                     closeModal();
                   }}
                 >
-                  Save &amp; close
+                  {savingInfo ? "Saving…" : "Save & close"}
                 </button>
               </span>
             </div>
