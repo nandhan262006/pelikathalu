@@ -103,6 +103,48 @@ export async function uploadBufferToR2(opts: {
   return `${cfg.publicBase}/${opts.key}`;
 }
 
+/** Object prefixes this dashboard creates. Pre-existing assets (e.g. images/web/*) are never auto-deleted. */
+const MANAGED_PREFIXES = /^(images\/uploads|videos\/uploads|images\/drive|videos\/drive)\//;
+
+/** Map a public R2 URL to its object key — only for dashboard-managed prefixes, else null. */
+export function parseManagedR2Key(url: string, cfg?: R2Config | null): string | null {
+  const c = cfg ?? getR2Config();
+  if (!c || !url) return null;
+  try {
+    const clean = url.split("?")[0];
+    const base = `${c.publicBase}/`;
+    if (!clean.startsWith(base)) return null;
+    const rawKey = clean.slice(base.length);
+    let key: string;
+    try {
+      key = decodeURIComponent(rawKey);
+    } catch {
+      key = rawKey;
+    }
+    return MANAGED_PREFIXES.test(key) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete one R2 object by key (cascade deletes). 404 counts as success. */
+export async function deleteR2Object(key: string, cfg?: R2Config): Promise<boolean> {
+  const c = cfg ?? getR2Config();
+  if (!c) return false;
+  const client = new AwsClient({
+    accessKeyId: c.accessKeyId,
+    secretAccessKey: c.secretAccessKey,
+    service: "s3",
+    region: "auto",
+  });
+  try {
+    const res = await client.fetch(`${c.endpoint}/${c.bucket}/${key}`, { method: "DELETE" });
+    return res.ok || res.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Google Drive helpers (server only — needs DRIVE_API_KEY)
 // ---------------------------------------------------------------------------

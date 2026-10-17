@@ -177,6 +177,45 @@ export async function deletePhoto(photoId: number): Promise<boolean> {
   return r.rowsAffected > 0;
 }
 
+export async function getPhotoUrl(photoId: number): Promise<string | null> {
+  const r = await getDb().execute({ sql: "SELECT url FROM photos WHERE id = ?", args: [photoId] });
+  return r.rows.length ? String(r.rows[0].url) : null;
+}
+
+/**
+ * Everything still referencing an R2 URL besides one album/photo: photo rows
+ * in other albums, other albums' covers, and any site content blob (draft +
+ * published). Used by cascade deletes so shared files are never broken.
+ */
+export async function referencedUrls(exclude?: {
+  albumSlug?: string;
+  photoId?: number;
+}): Promise<{ urls: Set<string>; blobs: string[] }> {
+  const db = getDb();
+  const urls = new Set<string>();
+  if (exclude?.albumSlug) {
+    const cond = exclude?.photoId ? "a.slug != ? AND p.id != ?" : "a.slug != ?";
+    const args = exclude?.photoId ? [exclude.albumSlug, exclude.photoId] : [exclude.albumSlug];
+    const photoRows = await db.execute({
+      sql: `SELECT p.url FROM photos p JOIN albums a ON p.album_id = a.id WHERE ${cond}`,
+      args: args as never[],
+    });
+    for (const row of photoRows.rows) urls.add(String(row.url));
+    const coverRows = await db.execute({
+      sql: "SELECT cover_url FROM albums WHERE cover_url IS NOT NULL AND slug != ?",
+      args: [exclude.albumSlug] as never[],
+    });
+    for (const row of coverRows.rows) if (row.cover_url) urls.add(String(row.cover_url));
+  }
+  const contentRows = await db.execute(
+    "SELECT draft_json, published_json FROM content WHERE draft_json IS NOT NULL OR published_json IS NOT NULL"
+  );
+  const blobs = contentRows.rows
+    .map((row) => `${row.draft_json ?? ""} ${row.published_json ?? ""}`)
+    .filter((b) => !!b);
+  return { urls, blobs };
+}
+
 export async function reorderPhotos(albumSlug: string, ids: number[]): Promise<boolean> {
   const db = getDb();
   const album = await getAlbumBySlug(albumSlug);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAlbumBySlug, listPhotos, updateAlbum, deleteAlbum } from "@/lib/albums";
+import { cascadeDeleteR2 } from "@/lib/media-cleanup";
 import { getDb } from "@/lib/db";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -54,7 +55,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ slug: st
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const [album, photos] = await Promise.all([getAlbumBySlug(slug), listPhotos(slug)]);
+  if (!album) return NextResponse.json({ error: "album not found" }, { status: 404 });
   const ok = await deleteAlbum(slug);
   if (!ok) return NextResponse.json({ error: "album not found" }, { status: 404 });
-  return NextResponse.json({ ok: true });
+  const cleaned = await cascadeDeleteR2(
+    [...photos.map((p) => p.url), album.coverUrl],
+    { albumSlug: slug }
+  );
+  return NextResponse.json({ ok: true, cleaned });
 }

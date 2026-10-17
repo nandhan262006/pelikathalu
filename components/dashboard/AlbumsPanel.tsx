@@ -29,6 +29,8 @@ type Album = {
 
 type Photo = { id: number; url: string; caption: string | null; sort: number };
 
+type CleanupResult = { deleted: number; kept: number; failed: number };
+
 type DriveFile = { id: string; name: string; url: string; thumb: string };
 
 type PickedFile = { file: File; path: string };
@@ -365,13 +367,18 @@ export default function AlbumsPanel() {
 
   const removeAlbum = async (slug: string) => {
     const a = albums.find((x) => x.slug === slug);
-    if (!window.confirm(`Delete “${a?.title ?? slug}” and all its photo links? The R2 files stay.`)) return;
+    if (!window.confirm(`Delete “${a?.title ?? slug}” and all its photos? The R2 files are deleted too — files still used elsewhere (other galleries, covers, site images) are kept.`)) return;
     try {
       const r = await fetch(`/api/albums/${slug}`, { method: "DELETE" });
-      if (!r.ok) return flash("Delete failed");
+      const d = r.ok ? ((await r.json()) as { cleaned?: CleanupResult }) : null;
+      if (!r.ok || !d) return flash("Delete failed");
       if (selected === slug) closeModal();
       await refresh();
-      flash("Album deleted");
+      flash(
+        d.cleaned?.deleted
+          ? `Album deleted — ${d.cleaned.deleted} R2 file${d.cleaned.deleted > 1 ? "s" : ""} removed${d.cleaned.kept ? `, ${d.cleaned.kept} kept (used elsewhere)` : ""} ✓`
+          : "Album deleted"
+      );
     } catch {
       flash("Delete failed — network");
     }
@@ -405,11 +412,13 @@ export default function AlbumsPanel() {
     setPhotos((cur) => cur.filter((p) => p.id !== id));
     try {
       const r = await fetch(`/api/albums/${selected}/photos/${id}`, { method: "DELETE" });
-      if (!r.ok) {
+      const d = r.ok ? ((await r.json()) as { cleaned?: CleanupResult }) : null;
+      if (!r.ok || !d) {
         setPhotos(snapshot);
         flash("Remove failed");
         return;
       }
+      if (d.cleaned?.deleted) flash(`Photo removed — file deleted from R2 ✓`);
       await refresh();
     } catch {
       setPhotos(snapshot);
@@ -420,13 +429,15 @@ export default function AlbumsPanel() {
   // Delete from inside the full preview — stay open on the next photo.
   const removePhotoInPreview = async (id: number) => {
     if (!selected || previewIndex === null) return;
-    if (!window.confirm("Delete this photo from the gallery? The R2 file stays.")) return;
+    if (!window.confirm("Delete this photo from the gallery? The R2 file is deleted too (kept if used elsewhere).")) return;
     const next = photos.filter((p) => p.id !== id);
     try {
       const r = await fetch(`/api/albums/${selected}/photos/${id}`, { method: "DELETE" });
-      if (!r.ok) return flash("Remove failed");
+      const d = r.ok ? ((await r.json()) as { cleaned?: CleanupResult }) : null;
+      if (!r.ok || !d) return flash("Remove failed");
       setPhotos(next);
       await refresh();
+      if (d.cleaned?.deleted) flash(`Photo removed — file deleted from R2 ✓`);
       if (!next.length) setPreviewIndex(null);
       else setPreviewIndex(Math.min(previewIndex, next.length - 1));
     } catch {
