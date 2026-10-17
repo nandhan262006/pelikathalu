@@ -8,6 +8,7 @@ export type DriveRef = { kind: "file" | "folder"; id: string };
  *  - https://drive.google.com/drive/folders/FOLDER_ID?usp=sharing
  *  - https://drive.google.com/drive/u/0/folders/FOLDER_ID
  *  - https://drive.google.com/embeddedfolderview?id=FOLDER_ID
+ *  - https://lh3.googleusercontent.com/d/FILE_ID (=w2000 optional)
  *  - raw id (25+ [A-Za-z0-9_-] chars)
  */
 export function parseDriveLink(input: string): DriveRef | null {
@@ -28,7 +29,8 @@ export function parseDriveLink(input: string): DriveRef | null {
   }
 
   const host = url.hostname.toLowerCase();
-  if (!host.includes("drive.google") && !host.includes("docs.google")) return null;
+  if (!host.includes("drive.google") && !host.includes("docs.google") && !host.includes("googleusercontent"))
+    return null;
 
   const path = url.pathname;
   const params = url.searchParams;
@@ -40,6 +42,11 @@ export function parseDriveLink(input: string): DriveRef | null {
   // /drive/folders/ID  (also /drive/u/N/folders/ID)
   const folderM = /\/folders\/([\w-]{10,})/.exec(path);
   if (folderM) return { kind: "folder", id: folderM[1] };
+
+  // lh3.googleusercontent.com/d/ID (=w2000 suffix optional) — the direct
+  // image URL from Drive's "Copy image address", already valid as a file.
+  const lh3m = /\/d\/([\w-]{10,})/.exec(path);
+  if (lh3m) return { kind: "file", id: lh3m[1] };
 
   // ?id=ID  — could be file (open/uc) or folder (embeddedfolderview)
   const qid = params.get("id");
