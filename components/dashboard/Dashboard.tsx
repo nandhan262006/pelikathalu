@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { editorSections, type FieldDef } from "@/lib/editor-schema";
-import { ListField, StringListField, MediaField, TextField, PalettePicker, CropPicker } from "./fields";
+import { ListField, StringListField, MediaField, TextField, PalettePicker, FontPicker, CropPicker, SwitchField, SliderField } from "./fields";
 import AlbumsPanel from "./AlbumsPanel";
 import type { SiteContent } from "@/lib/content";
 import "@/app/admin/dashboard.css";
@@ -62,38 +62,56 @@ export default function Dashboard({ site }: { site: string }) {
     setTimeout(() => setMsg(""), 3000);
   };
 
+  // Latest content/baseline without re-creating `save` on every keystroke.
+  const contentRef = useRef<Content | null>(null);
+  const baselineRef = useRef<Content | null>(null);
+  contentRef.current = content;
+  baselineRef.current = baseline;
+
+  // Serialized save chain: only one PUT in flight; each queued run saves the
+  // latest content at its turn, so drafts can never land out of order.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+
   const save = useCallback(async () => {
-    if (!content) return;
-    setSaveState("saving");
-    try {
+    const run = saveChainRef.current.then(async () => {
+      const c = contentRef.current;
+      if (!c) return;
+      // Skip if nothing changed since the last successful save.
+      if (baselineRef.current && JSON.stringify(c) === JSON.stringify(baselineRef.current)) return;
+      setSaveState("saving");
       const r = await fetch(`/api/sites/${site}/content`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content: c }),
       });
       if (!r.ok) {
         setSaveState("idle");
         flash(`Save failed (${r.status})`);
         return;
       }
-      setBaseline(structuredClone(content));
+      baselineRef.current = structuredClone(c);
+      setBaseline(baselineRef.current);
       setSaveState("saved");
       // Push straight into the draft iframe — instant, no reload, keeps scroll.
       const frame = frameRef.current?.contentWindow;
-      if (frame) frame.postMessage({ type: "pk-preview", content }, window.location.origin);
+      if (frame) frame.postMessage({ type: "pk-preview", content: c }, window.location.origin);
       else setPreviewKey(Date.now());
-    } catch {
-      setSaveState("idle");
-      flash("Save failed — network");
-    }
-  }, [content, site]);
+    });
+    saveChainRef.current = run.catch(() => {});
+    return run;
+  }, [site]);
+
+  // Arrange mode: reels draggable in the preview; autosave is held while on.
+  const [arrange, setArrange] = useState(false);
 
   // Debounced autosave: preview follows every edit ~700ms after typing pauses.
+  // Held while arrange mode is on — reel drags update state continuously;
+  // "Done arranging" issues a single save instead.
   useEffect(() => {
-    if (!dirty || status !== "ready") return;
+    if (!dirty || status !== "ready" || arrange) return;
     const t = setTimeout(() => void save(), 700);
     return () => clearTimeout(t);
-  }, [dirty, status, save]);
+  }, [dirty, status, arrange, save]);
 
   const publish = useCallback(async () => {
     if (dirty) await save();
@@ -107,7 +125,6 @@ export default function Dashboard({ site }: { site: string }) {
   };
 
   // Arrange mode: tell the preview iframe reels are draggable; receive drops.
-  const [arrange, setArrange] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => {
       frameRef.current?.contentWindow?.postMessage({ type: "pk-edit", on: arrange }, window.location.origin);
@@ -190,7 +207,12 @@ export default function Dashboard({ site }: { site: string }) {
           <button
             type="button"
             className={`db-btn ${arrange ? "db-btn-arrange-on" : ""}`}
-            onClick={() => setArrange((a) => !a)}
+            onClick={() => {
+              const next = !arrange;
+              setArrange(next);
+              // Leaving arrange mode: one save for all the drags we skipped.
+              if (!next && dirty) void save();
+            }}
             title="Drag theater reels to any position right in the preview"
           >
             {arrange ? "✓ Done arranging" : "✋ Arrange reels"}
@@ -241,6 +263,12 @@ export default function Dashboard({ site }: { site: string }) {
                         <StringListField key={`${f.path}:${f.type}`} def={f} value={(getIn(content, f.path) as string[]) ?? []} onChange={(v) => onChange(f.path, v)} />
                       ) : f.type === "palette" ? (
                         <PalettePicker key={`${f.path}:${f.type}`} value={String(getIn(content, f.path) ?? "pelli-classic")} onChange={(v) => onChange(f.path, v)} />
+                      ) : f.type === "font" ? (
+                        <FontPicker key={`${f.path}:${f.type}`} value={String(getIn(content, f.path) ?? "pelli-classic")} onChange={(v) => onChange(f.path, v)} />
+                      ) : f.type === "switch" ? (
+                        <SwitchField key={`${f.path}:${f.type}`} label={f.label} value={getIn(content, f.path) !== false} onChange={(v) => onChange(f.path, v)} />
+                      ) : f.type === "slider" ? (
+                        <SliderField key={`${f.path}:${f.type}`} label={f.label} value={Number(getIn(content, f.path) ?? 100)} onChange={(v) => onChange(f.path, v)} />
                       ) : f.type === "image" || f.type === "video" ? (
                         <div key={`${f.path}:${f.type}`} className="db-field-group">
                           <MediaField label={f.label} kind={f.type} value={String(getIn(content, f.path) ?? "")} onChange={(v) => onChange(f.path, v)} />

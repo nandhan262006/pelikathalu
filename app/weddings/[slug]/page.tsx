@@ -14,7 +14,7 @@ export default async function WeddingAlbumPage({ params }: { params: Promise<{ s
   const content = await getSiteContent("home", false);
 
   return (
-    <AlbumShell paletteId={content?.theme?.paletteId} whatsapp={content?.links.whatsapp}>
+    <AlbumShell paletteId={content?.theme?.paletteId} fontId={content?.theme?.fontId} whatsapp={content?.links.whatsapp}>
       <AlbumDetail
         eyebrow="Weddings"
         title={album.title}

@@ -5,6 +5,7 @@ import { Arrow } from "@/components/Icons";
 import PortfolioGallery from "@/components/PortfolioGallery";
 import SiteHeader from "@/components/SiteHeader";
 import PaletteVars from "@/components/PaletteVars";
+import FontVars from "@/components/FontVars";
 import { getSiteContent } from "@/lib/sites";
 
 const WHATSAPP_URL = "https://wa.me/";
@@ -29,6 +30,7 @@ export default async function PortfolioPage() {
   return (
     <div className="shell">
       <PaletteVars id={content?.theme?.paletteId} />
+      <FontVars id={content?.theme?.fontId} />
       <main className="page">
         <SiteHeader whatsapp={WHATSAPP_URL} solid />
 

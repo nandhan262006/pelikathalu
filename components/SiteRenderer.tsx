@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Arrow, Menu } from "@/components/Icons";
 import Reels from "@/components/Reels";
 import PaletteVars from "@/components/PaletteVars";
+import FontVars from "@/components/FontVars";
 import type { SiteContent } from "@/lib/content";
 
 const MENU_HREFS: Record<string, string> = {
@@ -121,6 +122,7 @@ export default function SiteRenderer({
   return (
     <div className="shell">
       <PaletteVars id={c.theme?.paletteId} />
+      <FontVars id={c.theme?.fontId} />
       <main className="page">
         {/* Header — VOWS style: hamburger left, logo center, underlined CTA right */}
         <header className="header">
@@ -155,7 +157,9 @@ export default function SiteRenderer({
             className="hero-img"
             style={{ backgroundImage: `url("${c.hero.slides[slide].img}")`, ...(c.hero.slides[slide].imgCrop ? { backgroundPosition: c.hero.slides[slide].imgCrop } : {}) }}
           />
-          <div className="hero-fade" />
+          {c.hero.fade?.enabled === false ? null : (
+            <div className="hero-fade" style={{ opacity: Math.min(1, Math.max(0, (c.hero.fade?.intensity ?? 100) / 100)) }} />
+          )}
           <div className="hero-content">
             <p className="eyebrow">{c.hero.eyebrow}</p>
             <h1 key={`title-${slide}`} className="hero-title hero-title-swap">

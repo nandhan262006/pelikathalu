@@ -3,6 +3,7 @@
 import { useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { FieldDef } from "@/lib/editor-schema";
 import { allPalettes } from "@/lib/palettes";
+import { fontKits } from "@/lib/fonts";
 
 export async function uploadToR2(file: File): Promise<string> {
   // Guard the upload slot before asking for a presigned URL.
@@ -78,6 +79,60 @@ export function TextField({
       ) : (
         <input className="db-input" type="text" value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
       )}
+    </label>
+  );
+}
+
+export function SwitchField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="db-field">
+      <span className="db-label">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        className={`db-btn db-btn-sm${value ? " db-btn-arrange-on" : ""}`}
+        onClick={() => onChange(!value)}
+      >
+        {value ? "On" : "Off"}
+      </button>
+    </div>
+  );
+}
+
+export function SliderField({
+  label,
+  value,
+  onChange,
+  min = 0,
+  max = 100,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <label className="db-field">
+      <span className="db-label">
+        {label} <em className="db-count">{Math.round(value)}%</em>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={Number.isFinite(value) ? value : max}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
     </label>
   );
 }
@@ -353,6 +408,43 @@ export function PalettePicker({
               ))}
             </span>
             <span className="db-pal-name">{p.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function FontPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="db-field">
+      <span className="db-label">
+        Site fonts <em className="db-count">{value}</em>
+      </span>
+      <div className="db-pal-grid">
+        {fontKits.map((k) => (
+          <button
+            key={k.id}
+            type="button"
+            className={`db-pal ${k.id === value ? "db-pal-on" : ""}`}
+            onClick={() => onChange(k.id)}
+            title={k.name}
+          >
+            <span className="db-font-preview" style={{ fontFamily: k.serif }}>
+              Pelli Kathalu
+            </span>
+            <span className="db-font-preview" style={{ fontFamily: k.script }}>
+              how it felt
+            </span>
+            <span className="db-font-preview" style={{ fontFamily: k.sans, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+              {k.name}
+            </span>
           </button>
         ))}
       </div>

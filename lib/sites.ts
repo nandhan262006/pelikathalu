@@ -44,21 +44,27 @@ export async function getSiteContent(slug: string, draft: boolean): Promise<Site
 }
 
 export async function saveDraft(slug: string, content: SiteContent): Promise<boolean> {
-  return withRetry(() =>
-    getDb().execute({
-      sql: `UPDATE content SET draft_json = ?, updated_at = datetime('now')
+  // Writes get a longer retry window (6 tries ≈ 16s of backoff) — a dropped
+  // draft save is far costlier than a slow one.
+  return withRetry(
+    () =>
+      getDb().execute({
+        sql: `UPDATE content SET draft_json = ?, updated_at = datetime('now')
           WHERE site_id = (SELECT id FROM sites WHERE slug = ?)`,
-      args: [JSON.stringify(content), slug],
-    })
+        args: [JSON.stringify(content), slug],
+      }),
+    6
   ).then((r) => r.rowsAffected > 0);
 }
 
 export async function publishSite(slug: string): Promise<boolean> {
-  return withRetry(() =>
-    getDb().execute({
-      sql: `UPDATE content SET published_json = draft_json, updated_at = datetime('now')
+  return withRetry(
+    () =>
+      getDb().execute({
+        sql: `UPDATE content SET published_json = draft_json, updated_at = datetime('now')
           WHERE site_id = (SELECT id FROM sites WHERE slug = ?)`,
-      args: [slug],
-    })
+        args: [slug],
+      }),
+    6
   ).then((r) => r.rowsAffected > 0);
 }

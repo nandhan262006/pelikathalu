@@ -1,16 +1,19 @@
 import Link from "next/link";
 import SiteHeader from "@/components/SiteHeader";
 import PaletteVars from "@/components/PaletteVars";
+import FontVars from "@/components/FontVars";
 
 const WHATSAPP_URL = "https://wa.me/";
 const INSTAGRAM_URL = "https://www.instagram.com/portraits.by_pellikathalu/";
 
 export default function AlbumShell({
   paletteId,
+  fontId,
   whatsapp,
   children,
 }: {
   paletteId?: string;
+  fontId?: string;
   whatsapp?: string;
   children: React.ReactNode;
 }) {
@@ -18,6 +21,7 @@ export default function AlbumShell({
   return (
     <div className="shell">
       <PaletteVars id={paletteId} />
+      <FontVars id={fontId} />
       <main className="page">
         <SiteHeader whatsapp={wa} solid />
         {children}

@@ -11,7 +11,7 @@ export default async function WeddingsPage() {
     getSiteContent("home", false),
   ]);
   return (
-    <AlbumShell paletteId={content?.theme?.paletteId} whatsapp={content?.links.whatsapp}>
+    <AlbumShell paletteId={content?.theme?.paletteId} fontId={content?.theme?.fontId} whatsapp={content?.links.whatsapp}>
       <AlbumIndex
         eyebrow="Weddings"
         title="Weddings"

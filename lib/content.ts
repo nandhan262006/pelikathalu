@@ -6,7 +6,7 @@ export type Reel = { src: string; poster?: string; label: string; rotate?: numbe
 export type Tease = { names: string; img: string; imgCrop?: string };
 
 export interface SiteContent {
-  theme: { paletteId: string };
+  theme: { paletteId: string; fontId: string };
   branding: { logoName: string; logoSub: string; ariaName: string };
   links: { whatsapp: string; instagram: string };
   menu: string[];
@@ -16,6 +16,7 @@ export interface SiteContent {
     names: string;
     cta: string;
     slides: HeroSlide[];
+    fade: { enabled: boolean; intensity: number }; // overlay over the hero photo; intensity 0–100
   };
   duo: {
     scriptLine: string;
@@ -87,7 +88,7 @@ export interface SiteContent {
 }
 
 export const defaultContent: SiteContent = {
-  theme: { paletteId: "pelli-classic" },
+  theme: { paletteId: "pelli-classic", fontId: "pelli-classic" },
   branding: {
     logoName: "Pelli Kathalu",
     logoSub: "BY PREM & PAVAN",
@@ -115,6 +116,7 @@ export const defaultContent: SiteContent = {
       { img: "/images/hero1.webp", title: "Portraits" },
       { img: "/images/hero2.jpg", title: "Portraits" },
     ],
+    fade: { enabled: true, intensity: 100 },
   },
   duo: {
     scriptLine: "It started with two people who simply loved",

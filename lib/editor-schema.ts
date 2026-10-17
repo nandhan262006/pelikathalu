@@ -1,4 +1,4 @@
-export type FieldType = "text" | "textarea" | "image" | "video" | "list" | "stringList" | "palette" | "toggle";
+export type FieldType = "text" | "textarea" | "image" | "video" | "list" | "stringList" | "palette" | "font" | "toggle" | "switch" | "slider";
 
 export interface FieldDef {
   path: string; // dot path from content root, e.g. "hero.eyebrow" or "reviews"
@@ -21,8 +21,11 @@ const img = (): unknown => ({ img: "", cap: "" });
 export const editorSections: SectionDef[] = [
   {
     id: "theme",
-    title: "Color Palette",
-    fields: [{ path: "theme.paletteId", label: "Site palette", type: "palette" }],
+    title: "Theme",
+    fields: [
+      { path: "theme.paletteId", label: "Site palette", type: "palette" },
+      { path: "theme.fontId", label: "Site fonts", type: "font" },
+    ],
   },
   {
     id: "brand",
@@ -42,6 +45,8 @@ export const editorSections: SectionDef[] = [
       { path: "hero.sub", label: "Sub line", type: "text" },
       { path: "hero.names", label: "Names strip", type: "text" },
       { path: "hero.cta", label: "CTA text", type: "text" },
+      { path: "hero.fade.enabled", label: "Photo overlay", type: "switch" },
+      { path: "hero.fade.intensity", label: "Overlay intensity", type: "slider" },
       {
         path: "hero.slides",
         label: "Slides",

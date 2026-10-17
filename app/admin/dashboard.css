@@ -624,6 +624,20 @@
   line-height: 1.2;
 }
 
+/* Font kit picker */
+.db-font-preview {
+  display: block;
+  font-size: 15px;
+  line-height: 1.25;
+  color: var(--db-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-font-preview + .db-font-preview {
+  font-size: 13px;
+}
+
 /* Crop focus picker */
 .db-field-group { display: grid; gap: 8px; }
 .db-label-row { display: flex; align-items: center; justify-content: space-between; }
