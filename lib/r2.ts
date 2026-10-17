@@ -212,7 +212,18 @@ export async function downloadDriveBytes(
     throw new Error(`"${meta.name}" is ${meta.mimeType}, not an image`);
 
   const size = meta.size ? Number(meta.size) : 0;
-  if (size > 60 * 1024 * 1024) throw new Error(`"${meta.name}" is ${(size / 1048576).toFixed(0)}MB — over 60MB limit`);
+  // Videos can't be transcoded server-side, so they keep a tight cap.
+  // Big IMAGES are fine: sharp recompresses them to a ≤2000px JPEG (~1-4MB)
+  // after download — allow large originals so panoramas/RAW exports still work.
+  const isVideo = meta.mimeType.startsWith("video/");
+  const limitMB = isVideo ? 60 : 150;
+  if (size > limitMB * 1024 * 1024) {
+    throw new Error(
+      isVideo
+        ? `"${meta.name}" is ${(size / 1048576).toFixed(0)}MB — over 60MB Drive import limit for videos. Upload it directly from your PC instead (up to 250MB).`
+        : `"${meta.name}" is ${(size / 1048576).toFixed(0)}MB — over 150MB. Export the file smaller and try again.`
+    );
+  }
 
   // 1) Official API download — most reliable for public files + API key
   let r = media;

@@ -752,7 +752,7 @@ export default function AlbumsPanel() {
     };
 
     // Failures no amount of re-clicking can fix — say so instead of looping.
-    const PERMANENT_RE = /over 60MB|not an image|not found|not public|Anyone with the link|is a folder|could not parse|not configured|is .*, not an/i;
+    const PERMANENT_RE = /over 60MB|over 150MB|not an image|not found|not public|Anyone with the link|is a folder|could not parse|not configured|is .*, not an/i;
     const isPermanent = (id: string) => {
       const e = failReasons.get(id);
       return e ? PERMANENT_RE.test(e) : false;
