@@ -203,7 +203,11 @@ export function MediaField({
             type="file"
             accept="video/mp4,video/quicktime,video/webm"
             hidden
-            onChange={(e) => void pick(e.target.files?.[0])}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = ""; // allow re-picking the same file later
+              void pick(f);
+            }}
           />
         </div>
       ) : (
@@ -223,7 +227,11 @@ export function MediaField({
             type="file"
             accept="image/*"
             hidden
-            onChange={(e) => void pick(e.target.files?.[0])}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = ""; // allow re-picking the same file later
+              void pick(f);
+            }}
           />
         </div>
       )}

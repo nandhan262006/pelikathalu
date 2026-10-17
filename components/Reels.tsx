@@ -123,13 +123,15 @@ export default function Reels({
       const box = gridRef.current?.getBoundingClientRect();
       if (!box || box.width === 0 || box.height === 0) return;
       const els = Array.from(gridRef.current?.querySelectorAll(".reel") ?? []) as HTMLElement[];
-      const items = reels
-        .map((_, i) => {
-          const el = els[i];
+      // DOM order skips reels with no src — map DOM position back to reel index.
+      const idxs = reels.map((r, i) => (r.src ? i : -1)).filter((i) => i >= 0);
+      const items = idxs
+        .map((reelIdx, pos) => {
+          const el = els[pos];
           if (!el) return null;
           const b = el.getBoundingClientRect();
           return {
-            i,
+            i: reelIdx,
             x: r1(((b.left - box.left) / box.width) * 100),
             y: r1(((b.top - box.top) / box.height) * 100),
             w: r1((b.width / box.width) * 100),
@@ -213,8 +215,17 @@ export default function Reels({
   const closeFull = useCallback(() => setFull(null), []);
 
   const stepFull = useCallback(
-    (d: number) => setFull((f) => (f === null ? f : (f + d + reels.length) % reels.length)),
-    [reels.length]
+    (d: number) =>
+      setFull((f) => {
+        if (f === null) return f;
+        let n = f;
+        for (let k = 0; k < reels.length; k++) {
+          n = (n + d + reels.length) % reels.length;
+          if (reels[n].src) break; // skip entries with no video
+        }
+        return n;
+      }),
+    [reels]
   );
 
   // Single tap = mute toggle, double tap = fullscreen.
@@ -278,10 +289,12 @@ export default function Reels({
         }
       >
         {reels.map((r, i) => {
+          // An empty src makes the browser re-download the page — skip broken entries.
+          if (!r.src) return null;
           const pos = live && live.i === i ? live : r.x != null && r.y != null && r.w != null && r.h != null ? r : null;
           return (
             <figure
-              key={r.src}
+              key={`${i}:${r.src}`}
               className={`reel ${tall[i] ? "reel-v" : "reel-h"}${r.rotate ? " reel-rot" : ""}${r.spot ? ` ${r.spot}` : ""}${pos ? " reel-placed" : ""}`}
               style={pos ? { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` } : undefined}
               onClick={() => onTap(i)}
