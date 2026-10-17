@@ -1424,9 +1424,16 @@ section { box-sizing: border-box; }
   white-space: nowrap;
 }
 @media (max-width: 899px) {
-  /* stored positions are a desktop art direction; mobile keeps the stacked flow */
-  .reel-placed { position: static !important; left: auto !important; top: auto !important; width: auto !important; height: auto !important; }
-  .v-theater .reels-grid { min-height: 0; }
+  /* Legacy px-snapshot placements are desktop px art — phones fall back to stacked flow.
+     Ratio-canvas compositions (placed-ratio) keep the desktop design, scaled by the canvas. */
+  .v-theater .reels-grid:not(.placed-ratio) .reel-placed {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: auto !important;
+    height: auto !important;
+  }
+  .v-theater .reels-grid:not(.placed-ratio) { min-height: 0; }
 }
 /* Tiles follow each video's native resolution via .reel-v / .reel-h auto-detection */
 .v-theater .reel { max-height: none; }
@@ -1450,9 +1457,8 @@ section { box-sizing: border-box; }
     column-gap: calc(8 * var(--u));
     row-gap: calc(8 * var(--u));
   }
-  /* placed-ratio is 0,3,0 — must be overridden explicitly or it squeezes the
-     canvas to desktop ratio and tiles overflow the box on phones. */
-  .v-theater .reels-grid.placed-ratio { aspect-ratio: auto; min-height: 0; }
+  /* placed-ratio keeps its desktop canvas ratio — do NOT flatten it here; the
+     aspect-ratio from .placed-ratio (specificity 3) wins over this 2-up rule. */
   .v-theater .reels-grid.reels-locked .reel-vt-1,
   .v-theater .reels-grid.reels-locked .reel-vt-2,
   .v-theater .reels-grid.reels-locked .reel-vt-4,

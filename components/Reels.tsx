@@ -130,6 +130,11 @@ export default function Reels({
     const snap = () => {
       const box = gridRef.current?.getBoundingClientRect();
       if (!box || box.width === 0 || box.height === 0) return;
+      // The stored composition is desktop art direction. Never snapshot a
+      // phone-width or stacked-flow canvas — doing so writes phone ratio/coords
+      // into the draft, which then explode the desktop theater (ratio < 1 makes
+      // the canvas taller than it is wide). Both guards must hold.
+      if (box.width < 700 || box.width / box.height < 1) return;
       const els = Array.from(gridRef.current?.querySelectorAll(".reel") ?? []) as HTMLElement[];
       // DOM order skips reels with no src — map DOM position back to reel index.
       const idxs = reels.map((r, i) => (r.src ? i : -1)).filter((i) => i >= 0);
