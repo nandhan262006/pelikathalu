@@ -223,6 +223,15 @@ export async function downloadDriveBytes(
   }
   if (!r.ok) throw new Error(`Drive download failed (${r.status}) — re-share as Anyone with the link → Viewer`);
   const contentType = r.headers.get("content-type")?.split(";")[0]?.trim() || meta.mimeType;
+  // The keyless CDN fallbacks can return an HTML page (sign-in / virus-scan
+  // interstitial) instead of bytes — storing that would corrupt the gallery.
+  // Some CDNs also report a generic mime, so trust Drive's own metadata too.
+  const isMedia = (t: string) => t.startsWith("image/") || t.startsWith("video/");
+  if (!isMedia(contentType) && !isMedia(meta.mimeType)) {
+    throw new Error(
+      `Drive returned "${contentType}" instead of the file — it is probably not public. Share → Anyone with the link → Viewer`
+    );
+  }
   const buf = new Uint8Array(await r.arrayBuffer());
   if (buf.length < 1024) throw new Error(`Drive returned only ${buf.length} bytes — file not public?`);
   return { bytes: buf, contentType, name: meta.name };

@@ -263,11 +263,17 @@ export default function AlbumsPanel() {
     [flash]
   );
 
-  // Keep the info fields in sync with the loaded album (dialog + list refreshes).
+  // Keep the info fields in sync with the loaded album — only when the dialog
+  // first opens a given album. A refresh triggered while editing (feature
+  // toggle, cover change…) must not clobber typed-but-unsaved info.
+  const syncedSlugRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selected) return;
     const a = albums.find((x) => x.slug === selected);
-    if (a) setInfo({ title: a.title, couple: a.couple ?? "", description: a.description ?? "" });
+    if (a && syncedSlugRef.current !== selected) {
+      setInfo({ title: a.title, couple: a.couple ?? "", description: a.description ?? "" });
+      syncedSlugRef.current = selected;
+    }
   }, [selected, albums]);
 
   const closeModal = useCallback(() => {
@@ -303,6 +309,23 @@ export default function AlbumsPanel() {
   }, [modalOpen, closeModal, previewIndex]);
 
   const busy = !!uploadProgress || !!driveProgress || creating || coverBusy || migrateBusy;
+
+  // One file/Drive upload pipeline at a time — a second concurrent batch would
+  // corrupt progress display and interleave attachments.
+  const uploadLock = useRef(false);
+  /** Re-entrant-safe run: refuses while another upload is active, holds the lock for `fn`. */
+  const withUploadLock = async (fn: () => Promise<void>): Promise<void> => {
+    if (uploadLock.current) {
+      flash("Still working — wait for the current upload to finish");
+      return;
+    }
+    uploadLock.current = true;
+    try {
+      await fn();
+    } finally {
+      uploadLock.current = false;
+    }
+  };
 
   /* ----------------------------- album ops ------------------------------ */
 
@@ -389,13 +412,18 @@ export default function AlbumsPanel() {
 
   /* ----------------------------- photo ops ------------------------------ */
 
-  const attachUrlsToAlbum = async (slug: string, urls: string[]) => {
+  const attachUrlsToAlbum = async (
+    slug: string,
+    urls: string[]
+  ): Promise<{ ok: boolean; urls?: string[] }> => {
     const r = await fetch(`/api/albums/${slug}/photos`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ urls }),
     });
-    return r.ok;
+    if (!r.ok) return { ok: false };
+    const d = (await r.json().catch(() => ({}))) as { urls?: string[] };
+    return { ok: true, urls: d.urls };
   };
 
   const appendPhotosLocal = (urls: { url: string; caption: string | null }[]) => {
@@ -432,6 +460,10 @@ export default function AlbumsPanel() {
   // Delete from inside the full preview — stay open on the next photo.
   const removePhotoInPreview = async (id: number) => {
     if (!selected || previewIndex === null) return;
+    if (id < 0) {
+      // Temp row from an optimistic append that hasn't been attached server-side yet.
+      return flash("Still uploading — try again once the upload finishes");
+    }
     if (!window.confirm("Delete this photo from the gallery? The R2 file is deleted too (kept if used elsewhere).")) return;
     const next = photos.filter((p) => p.id !== id);
     try {
@@ -542,12 +574,17 @@ export default function AlbumsPanel() {
       flash(`All uploads failed${failed.length ? `: ${failed[0].slice(0, 60)}` : ""}`);
       return;
     }
-    const ok = await attachUrlsToAlbum(slug, good);
-    if (!ok) return flash("Uploads done but attach failed — try again or paste the URLs");
-    appendPhotosLocal(good.map((u) => ({ url: u, caption: null })));
+    const attach = await attachUrlsToAlbum(slug, good);
+    if (!attach.ok) return flash("Uploads done but attach failed — try again or paste the URLs");
+    // Only append what the server actually persisted — its dedupe may have
+    // rejected URLs already in this gallery.
+    const landed = attach.urls?.length ? attach.urls : good;
+    appendPhotosLocal(landed.map((u) => ({ url: u, caption: null })));
     await refresh();
+    const dupes = good.length - landed.length;
     flash(
-      `Added ${good.length} photo${good.length > 1 ? "s" : ""}` +
+      `Added ${landed.length} photo${landed.length > 1 ? "s" : ""}` +
+        (dupes ? `, ${dupes} already in the gallery` : "") +
         (failed.length ? `, ${failed.length} failed (${failed[0].slice(0, 40)})` : "") +
         (oversize ? `, skipped ${oversize.length} over 250MB` : "") +
         (skipped ? `, skipped ${skipped} non-image` : "") +
@@ -556,12 +593,14 @@ export default function AlbumsPanel() {
   };
 
   const uploadFiles = async (files: FileList | File[] | null) => {
-    if (!files || !selected) return;
-    const arr = Array.from(files);
-    await uploadPickedToAlbum(selected, arr.map((f) => ({ file: f, path: pathOf(f) })));
-    // Reset inputs so the same selection can be picked twice in a row.
-    if (fileRef.current) fileRef.current.value = "";
-    if (folderRef.current) folderRef.current.value = "";
+    if (!files || !selected || busy) return;
+    await withUploadLock(async () => {
+      const arr = Array.from(files);
+      await uploadPickedToAlbum(selected, arr.map((f) => ({ file: f, path: pathOf(f) })));
+      // Reset inputs so the same selection can be picked twice in a row.
+      if (fileRef.current) fileRef.current.value = "";
+      if (folderRef.current) folderRef.current.value = "";
+    });
   };
 
   // Drop inside an open gallery → add to that gallery.
@@ -569,13 +608,17 @@ export default function AlbumsPanel() {
     if (!selected) return;
     const picked = await filesFromDataTransfer(dt);
     if (!picked.length) return flash("No files found in that drop");
-    await uploadPickedToAlbum(selected, picked);
+    await withUploadLock(() => uploadPickedToAlbum(selected, picked));
   };
 
   // Drop on the album list (no dialog open) → one new gallery per folder.
   const handleListDrop = async (dt: DataTransfer) => {
     const picked = await filesFromDataTransfer(dt);
     if (!picked.length) return flash("No files found in that drop");
+    await withUploadLock(() => runListDrop(picked));
+  };
+
+  const runListDrop = async (picked: PickedFile[]) => {
     const groups = groupByTopFolder(picked);
     const folders = [...groups.entries()].filter(([top]) => top !== "");
     try {

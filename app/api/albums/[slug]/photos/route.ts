@@ -24,9 +24,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     );
   }
   const urls = raw.map((u) => normalizeImageUrl(u)).filter((u) => /^https?:\/\//.test(u));
-  const added = await addPhotos(slug, urls);
-  if (added === 0) return NextResponse.json({ error: "album not found" }, { status: 404 });
-  return NextResponse.json({ ok: true, added }, { status: 201 });
+  const result = await addPhotos(slug, urls);
+  if (!result.albumFound) return NextResponse.json({ error: "album not found" }, { status: 404 });
+  return NextResponse.json(
+    {
+      ok: true,
+      added: result.added,
+      // Which URLs actually landed — the client appends only these so its grid
+      // never shows rows the server deduped away.
+      urls: result.addedUrls,
+      ...(result.skipped ? { skipped: result.skipped, note: `${result.skipped} URL(s) were already in this gallery` } : {}),
+    },
+    { status: result.added ? 201 : 200 }
+  );
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ slug: string }> }) {

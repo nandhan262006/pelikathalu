@@ -84,7 +84,24 @@ export async function POST(req: Request) {
   }
 
   if (imported.length) {
-    await addPhotos(albumSlug, imported.map((x) => x.r2Url));
+    const attach = await addPhotos(albumSlug, imported.map((x) => x.r2Url));
+    if (!attach.albumFound) return NextResponse.json({ error: "album not found" }, { status: 404 });
+    if (!attach.added) {
+      // Copies exist in R2 but nothing attached — surface a retry hint instead
+      // of a silent no-op.
+      return NextResponse.json(
+        {
+          ok: false,
+          albumSlug,
+          imported: [],
+          failed,
+          skipped,
+          added: 0,
+          error: "Copies were made but attaching failed — click Copy again (already-copied files are skipped).",
+        },
+        { status: 502 }
+      );
+    }
   }
 
   return NextResponse.json(

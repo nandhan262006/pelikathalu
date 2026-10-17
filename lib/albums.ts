@@ -191,16 +191,33 @@ export async function listPhotos(albumSlug: string): Promise<PhotoRow[]> {
   }));
 }
 
-export async function addPhotos(albumSlug: string, urls: string[]): Promise<number> {
+export async function addPhotos(
+  albumSlug: string,
+  urls: string[]
+): Promise<{ added: number; addedUrls: string[]; skipped: number; albumFound: boolean }> {
   const db = getDb();
   const album = await getAlbumBySlug(albumSlug);
-  if (!album) return 0;
+  if (!album) return { added: 0, addedUrls: [], skipped: 0, albumFound: false };
+
+  // Skip URLs already attached to this album — makes client retries safe.
+  const existing = new Set(
+    (await listPhotos(albumSlug)).map((p) => p.url)
+  );
+  const fresh = urls.filter((u) => !existing.has(u));
+  const skipped = urls.length - fresh.length;
+  if (!fresh.length) return { added: 0, addedUrls: [], skipped, albumFound: true };
+
+  // One INSERT per url, all in a single transaction: either the whole batch
+  // lands or none of it does — a Turso blip can no longer leave a half-full
+  // album with rows silently dropped.
   const maxRow = await db.execute({ sql: "SELECT COALESCE(MAX(sort), -1) AS m FROM photos WHERE album_id = ?", args: [album.id] });
   let sort = Number(maxRow.rows[0].m) + 1;
-  for (const url of urls) {
-    await db.execute({ sql: "INSERT INTO photos (album_id, url, sort) VALUES (?, ?, ?)", args: [album.id, url, sort++] });
-  }
-  return urls.length;
+  const stmts = fresh.map((url) => ({
+    sql: "INSERT INTO photos (album_id, url, sort) VALUES (?, ?, ?)",
+    args: [album.id, url, sort++],
+  }));
+  await withRetry(() => db.batch(stmts, "write"));
+  return { added: fresh.length, addedUrls: fresh, skipped, albumFound: true };
 }
 
 export async function deletePhoto(photoId: number): Promise<boolean> {

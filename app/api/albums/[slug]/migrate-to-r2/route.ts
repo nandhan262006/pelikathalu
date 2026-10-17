@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, withRetry } from "@/lib/db";
 import { getAlbumBySlug } from "@/lib/albums";
 import { copyDriveFileToR2, extractDriveId, getR2Config } from "@/lib/r2";
 
@@ -42,7 +42,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     }
     try {
       const { r2Url, name } = await copyDriveFileToR2(driveId, slug);
-      await db.execute({ sql: "UPDATE photos SET url = ? WHERE id = ?", args: [r2Url, photoId] });
+      // Idempotent single-row update — safe to retry on a Turso blip.
+      await withRetry(() =>
+        db.execute({ sql: "UPDATE photos SET url = ? WHERE id = ?", args: [r2Url, photoId] })
+      );
       migrated.push({ photoId, r2Url, name });
     } catch (e) {
       failed.push({ photoId, error: e instanceof Error ? e.message : "migrate failed" });

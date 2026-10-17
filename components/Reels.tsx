@@ -185,6 +185,8 @@ export default function Reels({
   };
 
   // Pause off-screen reels, resume muted autoplay when back in view.
+  // Depends on `reels`: a draft-preview update can add reels after mount, and
+  // those new elements need observing too.
   useEffect(() => {
     const els = vids.current.filter(Boolean) as HTMLVideoElement[];
     const io = new IntersectionObserver(
@@ -199,7 +201,7 @@ export default function Reels({
     );
     els.forEach((v) => io.observe(v));
     return () => io.disconnect();
-  }, []);
+  }, [reels]);
 
   const muteAllGrid = useCallback(() => {
     vids.current.forEach((el) => {
