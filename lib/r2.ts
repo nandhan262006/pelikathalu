@@ -1,4 +1,5 @@
 import { AwsClient, AwsV4Signer } from "aws4fetch";
+import sharp from "sharp";
 
 export type R2Config = {
   endpoint: string;
@@ -185,12 +186,39 @@ export async function downloadDriveBytes(
   return { bytes: buf, contentType, name: meta.name };
 }
 
+/**
+ * Web "medium" for gallery display: longest edge ≤2000px, JPEG q82, EXIF-safe
+ * orientation. Returns the recompressed bytes (content-type image/jpeg), or
+ * null when the format can't be decoded / is a video — caller keeps original.
+ */
+async function mediumBytes(
+  bytes: Uint8Array,
+  contentType: string
+): Promise<{ body: Uint8Array; contentType: string } | null> {
+  if (!contentType.startsWith("image/")) return null;
+  try {
+    const out = await sharp(Buffer.from(bytes), { failOn: "none" })
+      .rotate() // bake EXIF orientation into pixels
+      .resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    if (out.length < 1024) return null;
+    return { body: new Uint8Array(out), contentType: "image/jpeg" };
+  } catch {
+    // Undecodable format (e.g. some RAWs) — keep the original bytes.
+    return null;
+  }
+}
+
 /** Copy one Drive file straight into R2. Returns the permanent R2 public URL. */
 export async function copyDriveFileToR2(driveId: string, albumSlug: string, key?: string): Promise<{ r2Url: string; name: string; bytes: number }> {
   const { bytes, contentType, name } = await downloadDriveBytes(driveId, key);
-  const r2Key = buildDriveKey(albumSlug, driveId, name, contentType);
-  const r2Url = await uploadBufferToR2({ key: r2Key, body: bytes, contentType });
-  return { r2Url, name, bytes: bytes.length };
+  const medium = await mediumBytes(bytes, contentType);
+  const body = medium?.body ?? bytes;
+  const finalType = medium?.contentType ?? contentType;
+  const r2Key = buildDriveKey(albumSlug, driveId, name, finalType);
+  const r2Url = await uploadBufferToR2({ key: r2Key, body, contentType: finalType });
+  return { r2Url, name, bytes: body.length };
 }
 
 /**

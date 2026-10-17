@@ -39,8 +39,6 @@ export default function SiteRenderer({
   const [review, setReview] = useState(0);
   const [menu, setMenu] = useState(false);
   const [albums, setAlbums] = useState<AlbumCard[]>([]);
-  const [portraitAlbums, setPortraitAlbums] = useState<AlbumCard[]>([]);
-  const [featured, setFeatured] = useState<AlbumCard[]>([]);
   const [featuredPortraits, setFeaturedPortraits] = useState<AlbumCard[]>([]);
 
   useEffect(() => setC(serverContent), [serverContent]);
@@ -86,14 +84,7 @@ export default function SiteRenderer({
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((d) => setAlbums(d.albums))
       .catch(() => setAlbums([]));
-    fetch("/api/albums?category=portrait&nonempty=1")
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((d) => setPortraitAlbums(d.albums))
-      .catch(() => setPortraitAlbums([]));
-    fetch("/api/albums?featured=1&nonempty=1")
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((d) => setFeatured(d.albums))
-      .catch(() => setFeatured([]));
+    // Featured portrait albums appear in the Gallery slideshow on home.
     fetch("/api/albums?category=portrait&featured=1&nonempty=1")
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((d) => setFeaturedPortraits(d.albums))
@@ -119,7 +110,7 @@ export default function SiteRenderer({
     );
     els.forEach((el) => io.observe(el));
     return () => io.disconnect();
-  }, [c, albums, portraitAlbums, featured, featuredPortraits]);
+  }, [c, albums, featuredPortraits]);
 
   const r = c.reviews[review % c.reviews.length];
   const move = (d: number) => setReview((i) => (i + d + c.reviews.length) % c.reviews.length);
@@ -333,25 +324,15 @@ export default function SiteRenderer({
             <p className="v-portraits-proof" data-reveal style={{ transitionDelay: "220ms" }}>
               {c.portraits.proof}
             </p>
-            {(featuredPortraits.length > 0 ? featuredPortraits : portraitAlbums).length > 0 ? (
+            {/* Decorative only — portrait albums now live in the Gallery section below. */}
+            {(c.portraits.grid ?? []).length > 0 && (
               <div className="v-tease-scroll" data-reveal style={{ transitionDelay: "240ms" }}>
-                {(featuredPortraits.length > 0 ? featuredPortraits : portraitAlbums).slice(0, 6).map((a) => (
-                  <a key={a.slug} href={`/portraits/${a.slug}`} className="v-tease-card">
-                    <div className="v-tease-img" style={a.cover ? { backgroundImage: `url("${a.cover}")` } : undefined} />
-                    <h3 className="v-names">{a.title}</h3>
+                {(c.portraits.grid ?? []).slice(0, 6).map((src) => (
+                  <a key={src} href="/portraits" className="v-tease-card">
+                    <div className="v-tease-img" style={{ backgroundImage: `url("${src}")` }} />
                   </a>
                 ))}
               </div>
-            ) : (
-              (c.portraits.grid ?? []).length > 0 && (
-                <div className="v-tease-scroll" data-reveal style={{ transitionDelay: "240ms" }}>
-                  {(c.portraits.grid ?? []).slice(0, 6).map((src) => (
-                    <a key={src} href="/portraits" className="v-tease-card">
-                      <div className="v-tease-img" style={{ backgroundImage: `url("${src}")` }} />
-                    </a>
-                  ))}
-                </div>
-              )
             )}
             <div data-reveal style={{ transitionDelay: "280ms" }}>
               <a href="/portraits" className="v-underline-cta v-cta-inv">
@@ -394,17 +375,16 @@ export default function SiteRenderer({
           <p className="v-hand">{c.theater.hand}</p>
         </section>
 
-        {/* Gallery slideshow — featured WEDDING albums only (portraits live in their own section above) */}
+        {/* Gallery slideshow — featured PORTRAIT albums (weddings have their own section above) */}
         <section className="v-tease" id="work">
           <h2 className="v-big">{c.gallery.heading}</h2>
           <p className="v-small">{c.gallery.small}</p>
           <div className="v-tease-scroll">
-            {featured.filter((g) => g.category !== "portrait").length > 0
-              ? featured
-                  .filter((g) => g.category !== "portrait")
+            {featuredPortraits.length > 0
+              ? featuredPortraits
                   .slice(0, 6)
                   .map((g) => (
-                    <a key={g.slug} href={`/weddings/${g.slug}`} className="v-tease-card">
+                    <a key={g.slug} href={`/portraits/${g.slug}`} className="v-tease-card">
                       <div
                         className="v-tease-img"
                         style={g.cover ? { backgroundImage: `url("${g.cover}")` } : undefined}
@@ -413,13 +393,13 @@ export default function SiteRenderer({
                     </a>
                   ))
               : c.gallery.items.map((g) => (
-                  <a key={g.names} href="/portfolio" className="v-tease-card">
+                  <a key={g.names} href="/portraits" className="v-tease-card">
                     <div className="v-tease-img" style={{ backgroundImage: `url("${g.img}")`, ...(g.imgCrop ? { backgroundPosition: g.imgCrop } : {}) }} />
                     <h3 className="v-names">{g.names}</h3>
                   </a>
                 ))}
           </div>
-          <a href="/portfolio" className="v-underline-cta">{c.gallery.cta}</a>
+          <a href="/portraits" className="v-underline-cta">{c.gallery.cta}</a>
         </section>
 
         {/* Reviews */}

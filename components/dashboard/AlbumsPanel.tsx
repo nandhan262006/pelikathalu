@@ -188,7 +188,6 @@ export default function AlbumsPanel() {
   const tmpId = useRef(-1); // temp ids for optimistically appended grid rows
 
   /* ---- drive ---- */
-  const [pasteUrls, setPasteUrls] = useState("");
   const [driveLink, setDriveLink] = useState("");
   const [driveFiles, setDriveFiles] = useState<DriveFile[]>([]);
   const [driveBusy, setDriveBusy] = useState(false);
@@ -271,7 +270,6 @@ export default function AlbumsPanel() {
     setSelected(null);
     setPhotos([]);
     setPreviewIndex(null);
-    setPasteUrls("");
     setDriveLink("");
     setDriveFiles([]);
     setDriveKind(null);
@@ -478,21 +476,6 @@ export default function AlbumsPanel() {
       setCoverBusy(false);
       if (coverFileRef.current) coverFileRef.current.value = "";
     }
-  };
-
-  const addPasted = async () => {
-    if (!selected) return;
-    const urls = pasteUrls
-      .split(/\s+/)
-      .map((u) => u.trim())
-      .filter((u) => /^https?:\/\//.test(u));
-    if (!urls.length) return flash("No valid URLs found");
-    const ok = await attachUrlsToAlbum(selected, urls);
-    if (!ok) return flash("Attach failed — Drive links are auto-converted, use the Drive import below");
-    setPasteUrls("");
-    appendPhotosLocal(urls.map((u) => ({ url: u, caption: null })));
-    await refresh();
-    flash(`Added ${urls.length} photo${urls.length > 1 ? "s" : ""} by URL ✓`);
   };
 
   /* ------------------------------- uploads ------------------------------ */
@@ -1283,21 +1266,6 @@ export default function AlbumsPanel() {
                   <p className="db-albums-hint">No photos yet — upload above, drop files here, or use the Drive import below.</p>
                 )}
               </div>
-
-              {/* paste urls */}
-              <label className="db-field">
-                <span className="db-label">Add photos by URL (space/newline separated)</span>
-                <textarea
-                  className="db-input db-textarea"
-                  rows={2}
-                  value={pasteUrls}
-                  onChange={(e) => setPasteUrls(e.target.value)}
-                  placeholder="https://pub-….r2.dev/images/web/…"
-                />
-                <button type="button" className="db-btn db-btn-add" disabled={!pasteUrls.trim()} onClick={() => void addPasted()}>
-                  + Attach URLs
-                </button>
-              </label>
 
               {/* drive → r2 */}
               <div className="db-field" style={{ border: "1px dashed var(--db-line)", borderRadius: 8, padding: 10 }}>
