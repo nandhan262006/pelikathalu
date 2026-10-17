@@ -1,0 +1,13 @@
+import type { MetadataRoute } from "next";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "Pelli Kathalu by Prem & Pavan",
+    short_name: "Pelli Kathalu",
+    description: "Wedding photography & films in Hyderabad — captured the way they feel.",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#ffffff",
+  };
+}

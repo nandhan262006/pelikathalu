@@ -2,6 +2,7 @@ import Link from "next/link";
 import SiteHeader from "@/components/SiteHeader";
 import PaletteVars from "@/components/PaletteVars";
 import FontVars from "@/components/FontVars";
+import StructuredData from "@/components/StructuredData";
 
 const WHATSAPP_URL = "https://wa.me/";
 const INSTAGRAM_URL = "https://www.instagram.com/portraits.by_pellikathalu/";
@@ -22,6 +23,7 @@ export default function AlbumShell({
     <div className="shell">
       <PaletteVars id={paletteId} />
       <FontVars id={fontId} />
+      <StructuredData />
       <main className="page">
         <SiteHeader whatsapp={wa} solid />
         {children}

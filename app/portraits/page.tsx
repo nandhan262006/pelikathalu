@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
 import AlbumIndex from "@/components/AlbumIndex";
 import AlbumShell from "@/components/AlbumShell";
 import { listAlbumsSafe } from "@/lib/albums";
 import { getSiteContent } from "@/lib/sites";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Portraits — Personalities & Powerful Visual Identities",
+  description: "Portrait galleries by Pelli Kathalu — from everyday faces to well-known personalities, all shot in Hyderabad.",
+  alternates: { canonical: "/portraits" },
+};
 
 export default async function PortraitsPage() {
   const [albums, content] = await Promise.all([

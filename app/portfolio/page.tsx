@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import PortfolioGallery from "@/components/PortfolioGallery";
 import SiteHeader from "@/components/SiteHeader";
 import PaletteVars from "@/components/PaletteVars";
 import FontVars from "@/components/FontVars";
+import StructuredData from "@/components/StructuredData";
 import { getSiteContent } from "@/lib/sites";
 
 const WHATSAPP_URL = "https://wa.me/";
@@ -25,12 +27,19 @@ const photos = getPhotos();
 
 export const dynamic = "force-dynamic";
 
+export const metadata: Metadata = {
+  title: "Portfolio — Full Frames Archive",
+  description: "The complete Pelli Kathalu archive — unposed, documentary frames from real weddings and shoots, newest first.",
+  alternates: { canonical: "/portfolio" },
+};
+
 export default async function PortfolioPage() {
   const content = await getSiteContent("home", false);
   return (
     <div className="shell">
       <PaletteVars id={content?.theme?.paletteId} />
       <FontVars id={content?.theme?.fontId} />
+      <StructuredData />
       <main className="page">
         <SiteHeader whatsapp={WHATSAPP_URL} solid />
 

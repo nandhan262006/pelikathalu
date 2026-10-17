@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { SITE_NAME, SITE_TAGLINE, SITE_URL, absoluteUrl } from "@/lib/site-url";
 import "@fontsource/bodoni-moda/400.css";
 import "@fontsource/bodoni-moda/400-italic.css";
 import "@fontsource/bodoni-moda/500.css";
@@ -48,9 +49,50 @@ import "@fontsource/mulish/500.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Portraits by Pelli Kathalu — Prem & Pavan",
-  description:
-    "Portraits, pre-weddings, weddings and events. Captured the way they feel.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: `${SITE_NAME} — Wedding Photography & Films Hyderabad`,
+    template: `%s | ${SITE_NAME}`,
+  },
+  description: SITE_TAGLINE,
+  keywords: [
+    "pellikathalu",
+    "pelli kathalu",
+    "Pelli Kathalu",
+    "wedding photographer Hyderabad",
+    "wedding photography Hyderabad",
+    "wedding cinematography Hyderabad",
+    "pre wedding photographer Hyderabad",
+    "portrait photographer Hyderabad",
+    "best wedding photographers in Hyderabad",
+    "candid wedding photography Hyderabad",
+    "Prem and Pavan photography",
+  ],
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    locale: "en_IN",
+    url: SITE_URL,
+    title: `${SITE_NAME} — Wedding Photography & Films Hyderabad`,
+    description: SITE_TAGLINE,
+    // photography arriving soon · hero2.jpg
+    images: [{ url: absoluteUrl("/images/hero2.jpg"), width: 1200, height: 800, alt: `${SITE_NAME} — wedding story frames` }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE_NAME} — Wedding Photography & Films Hyderabad`,
+    description: SITE_TAGLINE,
+    images: [absoluteUrl("/images/hero2.jpg")],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 },
+  },
+  category: "photography",
+  authors: [{ name: "Prem Chandra", url: SITE_URL }, { name: "Pavan", url: SITE_URL }],
+  publisher: SITE_NAME,
 };
 
 export const viewport: Viewport = {

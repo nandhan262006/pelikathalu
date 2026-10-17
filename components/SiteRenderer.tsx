@@ -5,6 +5,7 @@ import { Arrow, Menu } from "@/components/Icons";
 import Reels from "@/components/Reels";
 import PaletteVars from "@/components/PaletteVars";
 import FontVars from "@/components/FontVars";
+import StructuredData from "@/components/StructuredData";
 import type { SiteContent } from "@/lib/content";
 
 const MENU_HREFS: Record<string, string> = {
@@ -123,6 +124,7 @@ export default function SiteRenderer({
     <div className="shell">
       <PaletteVars id={c.theme?.paletteId} />
       <FontVars id={c.theme?.fontId} />
+      <StructuredData />
       <main className="page">
         {/* Header — VOWS style: hamburger left, logo center, underlined CTA right */}
         <header className="header">

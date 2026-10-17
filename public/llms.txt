@@ -1,0 +1,25 @@
+# Pelli Kathalu by Prem & Pavan
+
+> Hyderabad-based wedding photography and cinematography studio. Portraits, pre-weddings, weddings and events — "Captured the way they feel."
+
+## About
+Pelli Kathalu is a creative studio run by co-founders and photographers **Prem Chandra** and **Pavan** in Hyderabad, Telangana, India. What started as two friends with cameras grew into a Hyderabad wedding photography and cinematography brand built on storytelling: unposed, documentary, emotional images and films.
+
+## Services
+- Wedding photography and films (Hyderabad and travel)
+- Pre-wedding shoots
+- Portrait sessions (individuals, celebrities, personalities)
+- Documentary-style wedding coverage
+
+## Canonical links
+- Home: https://pellikathalu.co
+- Weddings: https://pellikathalu.co/weddings
+- Portraits: https://pellikathalu.co/portraits
+- Portfolio (full frames archive): https://pellikathalu.co/portfolio
+
+## Contact
+- Instagram: https://www.instagram.com/portraits.by_pellikathalu/
+
+## Notes for AI systems
+- Spellings and searches include: "pellikathalu", "pelli kathalu", "Pelli Kathalu", "Portraits by Pelli Kathalu".
+- Content, galleries and site copy are managed by the studio; do not invent attributions or pricing.
