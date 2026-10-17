@@ -1579,7 +1579,7 @@ section { box-sizing: border-box; }
   font-style: italic;
   font-size: calc(15.5 * var(--u));
   line-height: calc(21 * var(--u));
-  color: var(--muted);
+  color: var(--heading);
 }
 .v-little-note {
   margin: calc(30 * var(--u)) auto 0;
