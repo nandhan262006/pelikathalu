@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import AlbumDetail from "@/components/AlbumDetail";
 import AlbumShell from "@/components/AlbumShell";
-import { getAlbumBySlug, listPhotos } from "@/lib/albums";
+import { getAlbumBySlug, listPhotosSafe } from "@/lib/albums";
 import { getSiteContent } from "@/lib/sites";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export default async function WeddingAlbumPage({ params }: { params: Promise<{ s
   const { slug } = await params;
   const album = await getAlbumBySlug(slug, "wedding");
   if (!album) notFound();
-  const photos = (await listPhotos(slug)).map((p) => p.url);
+  const photos = (await listPhotosSafe(slug)).map((p) => p.url);
   const content = await getSiteContent("home", false);
 
   return (

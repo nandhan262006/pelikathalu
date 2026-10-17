@@ -74,6 +74,28 @@ export async function listFeatured(category?: AlbumCategory): Promise<AlbumRow[]
   return listAlbums({ category, featuredOnly: true });
 }
 
+/**
+ * Public-page wrapper: on a Turso outage, keep serving the page (empty
+ * galleries) instead of a 500. Draft/admin callers use the raw functions.
+ */
+export async function listAlbumsSafe(filter?: Parameters<typeof listAlbums>[0]): Promise<AlbumRow[]> {
+  try {
+    return await listAlbums(filter);
+  } catch (e) {
+    console.error(`[albums] listAlbums failed — serving empty list:`, e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+export async function listPhotosSafe(albumSlug: string): Promise<PhotoRow[]> {
+  try {
+    return await listPhotos(albumSlug);
+  } catch (e) {
+    console.error(`[albums] listPhotos(${albumSlug}) failed — serving empty list:`, e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 export async function getAlbumBySlug(slug: string, category?: AlbumCategory): Promise<AlbumRow | null> {
   const all = await listAlbums(category ? { category } : undefined);
   return all.find((a) => a.slug === slug) ?? null;

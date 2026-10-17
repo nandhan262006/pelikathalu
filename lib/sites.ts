@@ -1,9 +1,16 @@
 import { getDb, withRetry } from "./db";
 import { defaultContent, mergeContent, type SiteContent } from "./content";
 
+/**
+ * Last-known-good published content per slug (module scope, per warm instance).
+ * Survives a Turso outage better than falling straight to blank defaults —
+ * visitors keep seeing the last successfully served published site.
+ */
+const lastGoodPublished = new Map<string, SiteContent>();
+
 export async function getSiteContent(slug: string, draft: boolean): Promise<SiteContent | null> {
   try {
-    return await withRetry(async () => {
+    const content = await withRetry(async () => {
       const db = getDb();
       const r = await db.execute({
         sql: `SELECT c.${draft ? "draft_json" : "published_json"} AS json
@@ -20,10 +27,17 @@ export async function getSiteContent(slug: string, draft: boolean): Promise<Site
         return mergeContent({});
       }
     });
+    if (!draft && content) lastGoodPublished.set(slug, content);
+    return content;
   } catch (e) {
-    // Public site must not 500 on a Turso blip: fall back to defaults.
+    // Public site must not 500 on a Turso blip: serve last-good, then defaults.
     // Draft preview surfaces the error so the dashboard can retry.
     if (draft) throw e;
+    const good = lastGoodPublished.get(slug);
+    if (good) {
+      console.error(`[sites] Turso unreachable for "${slug}" — serving last-good published content:`, e instanceof Error ? e.message : e);
+      return good;
+    }
     console.error(`[sites] Turso unreachable for "${slug}" — serving defaults:`, e instanceof Error ? e.message : e);
     return mergeContent({});
   }

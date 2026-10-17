@@ -1,13 +1,13 @@
 import AlbumIndex from "@/components/AlbumIndex";
 import AlbumShell from "@/components/AlbumShell";
-import { listAlbums } from "@/lib/albums";
+import { listAlbumsSafe } from "@/lib/albums";
 import { getSiteContent } from "@/lib/sites";
 
 export const dynamic = "force-dynamic";
 
 export default async function WeddingsPage() {
   const [albums, content] = await Promise.all([
-    listAlbums({ category: "wedding", hideEmpty: true }),
+    listAlbumsSafe({ category: "wedding", hideEmpty: true }),
     getSiteContent("home", false),
   ]);
   return (

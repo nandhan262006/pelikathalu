@@ -5,6 +5,10 @@ import type { FieldDef } from "@/lib/editor-schema";
 import { allPalettes } from "@/lib/palettes";
 
 export async function uploadToR2(file: File): Promise<string> {
+  // Guard the upload slot before asking for a presigned URL.
+  if (file.size > 250 * 1024 * 1024) {
+    throw new Error(`${file.name} is ${(file.size / 1048576).toFixed(0)}MB — over the 250MB limit`);
+  }
   const metaRes = await fetch("/api/r2/upload-url", {
     method: "POST",
     headers: { "content-type": "application/json" },
