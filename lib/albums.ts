@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { getDb, withRetry } from "./db";
 
 export type AlbumCategory = "wedding" | "portrait";
 
@@ -41,15 +41,17 @@ export async function listAlbums(filter?: {
     where.push("a.featured = 1");
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const r = await getDb().execute(
-    `SELECT a.id, a.slug, a.title, a.couple, a.description,
-            COALESCE(a.category, 'wedding') AS category,
-            COALESCE(a.featured, 0) AS featured,
-            (SELECT COUNT(*) FROM photos p WHERE p.album_id = a.id) AS count,
-            a.cover_url,
-            COALESCE(a.cover_url, (SELECT p.url FROM photos p WHERE p.album_id = a.id ORDER BY p.sort, p.id LIMIT 1)) AS cover
-     FROM albums a ${whereSql} ORDER BY a.featured DESC, a.id DESC`,
-    args as never[]
+  const r = await withRetry(() =>
+    getDb().execute(
+      `SELECT a.id, a.slug, a.title, a.couple, a.description,
+              COALESCE(a.category, 'wedding') AS category,
+              COALESCE(a.featured, 0) AS featured,
+              (SELECT COUNT(*) FROM photos p WHERE p.album_id = a.id) AS count,
+              a.cover_url,
+              COALESCE(a.cover_url, (SELECT p.url FROM photos p WHERE p.album_id = a.id ORDER BY p.sort, p.id LIMIT 1)) AS cover
+       FROM albums a ${whereSql} ORDER BY a.featured DESC, a.id DESC`,
+      args as never[]
+    )
   );
   return r.rows
     .map((x) => ({
@@ -86,7 +88,7 @@ export async function createAlbum(input: {
   featured?: boolean;
 }): Promise<AlbumRow | { error: string }> {
   const db = getDb();
-  const exists = await db.execute({ sql: "SELECT id FROM albums WHERE slug = ?", args: [input.slug] });
+  const exists = await withRetry(() => db.execute({ sql: "SELECT id FROM albums WHERE slug = ?", args: [input.slug] }));
   if (exists.rows.length > 0) return { error: "slug already exists" };
   await db.execute({
     sql: "INSERT INTO albums (slug, title, couple, description, category, featured) VALUES (?, ?, ?, ?, ?, ?)",
@@ -116,18 +118,21 @@ export async function updateAlbum(
   const db = getDb();
   const album = await getAlbumBySlug(slug);
   if (!album) return false;
-  await db.execute({
-    sql: "UPDATE albums SET title = ?, couple = ?, description = ?, cover_url = ?, category = ?, featured = ? WHERE id = ?",
-    args: [
-      patch.title ?? album.title,
-      patch.couple ?? album.couple,
-      patch.description ?? album.description,
-      patch.cover === undefined ? album.coverUrl : patch.cover,
-      patch.category ?? album.category,
-      patch.featured === undefined ? (album.featured ? 1 : 0) : patch.featured ? 1 : 0,
-      album.id,
-    ],
-  });
+  // Idempotent single-row patch — safe to retry on a network blip.
+  await withRetry(() =>
+    db.execute({
+      sql: "UPDATE albums SET title = ?, couple = ?, description = ?, cover_url = ?, category = ?, featured = ? WHERE id = ?",
+      args: [
+        patch.title ?? album.title,
+        patch.couple ?? album.couple,
+        patch.description ?? album.description,
+        patch.cover === undefined ? album.coverUrl : patch.cover,
+        patch.category ?? album.category,
+        patch.featured === undefined ? (album.featured ? 1 : 0) : patch.featured ? 1 : 0,
+        album.id,
+      ],
+    })
+  );
   return true;
 }
 
@@ -135,12 +140,14 @@ export async function deleteAlbum(slug: string): Promise<boolean> {
   const db = getDb();
   const album = await getAlbumBySlug(slug);
   if (!album) return false;
-  await db.batch(
-    [
-      { sql: "DELETE FROM photos WHERE album_id = ?", args: [album.id] },
-      { sql: "DELETE FROM albums WHERE id = ?", args: [album.id] },
-    ],
-    "write"
+  await withRetry(() =>
+    db.batch(
+      [
+        { sql: "DELETE FROM photos WHERE album_id = ?", args: [album.id] },
+        { sql: "DELETE FROM albums WHERE id = ?", args: [album.id] },
+      ],
+      "write"
+    )
   );
   return true;
 }
@@ -148,10 +155,12 @@ export async function deleteAlbum(slug: string): Promise<boolean> {
 export async function listPhotos(albumSlug: string): Promise<PhotoRow[]> {
   const album = await getAlbumBySlug(albumSlug);
   if (!album) return [];
-  const r = await getDb().execute({
-    sql: "SELECT id, url, caption, sort FROM photos WHERE album_id = ? ORDER BY sort, id",
-    args: [album.id],
-  });
+  const r = await withRetry(() =>
+    getDb().execute({
+      sql: "SELECT id, url, caption, sort FROM photos WHERE album_id = ? ORDER BY sort, id",
+      args: [album.id],
+    })
+  );
   return r.rows.map((x) => ({
     id: Number(x.id),
     url: String(x.url),
@@ -173,12 +182,16 @@ export async function addPhotos(albumSlug: string, urls: string[]): Promise<numb
 }
 
 export async function deletePhoto(photoId: number): Promise<boolean> {
-  const r = await getDb().execute({ sql: "DELETE FROM photos WHERE id = ?", args: [photoId] });
+  const r = await withRetry(() =>
+    getDb().execute({ sql: "DELETE FROM photos WHERE id = ?", args: [photoId] })
+  );
   return r.rowsAffected > 0;
 }
 
 export async function getPhotoUrl(photoId: number): Promise<string | null> {
-  const r = await getDb().execute({ sql: "SELECT url FROM photos WHERE id = ?", args: [photoId] });
+  const r = await withRetry(() =>
+    getDb().execute({ sql: "SELECT url FROM photos WHERE id = ?", args: [photoId] })
+  );
   return r.rows.length ? String(r.rows[0].url) : null;
 }
 
@@ -224,6 +237,6 @@ export async function reorderPhotos(albumSlug: string, ids: number[]): Promise<b
     sql: "UPDATE photos SET sort = ? WHERE id = ? AND album_id = ?",
     args: [i, id, album.id],
   }));
-  if (stmts.length) await db.batch(stmts, "write");
+  if (stmts.length) await withRetry(() => db.batch(stmts, "write"));
   return true;
 }

@@ -1,18 +1,5 @@
-import { getDb } from "./db";
+import { getDb, withRetry } from "./db";
 import { defaultContent, mergeContent, type SiteContent } from "./content";
-
-async function withRetry<T>(fn: () => Promise<T>, tries = 2): Promise<T> {
-  let last: unknown;
-  for (let i = 0; i < tries; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      last = e;
-      await new Promise((r) => setTimeout(r, 200 * (i + 1)));
-    }
-  }
-  throw last;
-}
 
 export async function getSiteContent(slug: string, draft: boolean): Promise<SiteContent | null> {
   try {
@@ -43,21 +30,21 @@ export async function getSiteContent(slug: string, draft: boolean): Promise<Site
 }
 
 export async function saveDraft(slug: string, content: SiteContent): Promise<boolean> {
-  const db = getDb();
-  const r = await db.execute({
-    sql: `UPDATE content SET draft_json = ?, updated_at = datetime('now')
+  return withRetry(() =>
+    getDb().execute({
+      sql: `UPDATE content SET draft_json = ?, updated_at = datetime('now')
           WHERE site_id = (SELECT id FROM sites WHERE slug = ?)`,
-    args: [JSON.stringify(content), slug],
-  });
-  return r.rowsAffected > 0;
+      args: [JSON.stringify(content), slug],
+    })
+  ).then((r) => r.rowsAffected > 0);
 }
 
 export async function publishSite(slug: string): Promise<boolean> {
-  const db = getDb();
-  const r = await db.execute({
-    sql: `UPDATE content SET published_json = draft_json, updated_at = datetime('now')
+  return withRetry(() =>
+    getDb().execute({
+      sql: `UPDATE content SET published_json = draft_json, updated_at = datetime('now')
           WHERE site_id = (SELECT id FROM sites WHERE slug = ?)`,
-    args: [slug],
-  });
-  return r.rowsAffected > 0;
+      args: [slug],
+    })
+  ).then((r) => r.rowsAffected > 0);
 }

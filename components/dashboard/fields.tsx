@@ -92,6 +92,9 @@ export function MediaField({
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [driveLink, setDriveLink] = useState("");
+  const [driveBusy, setDriveBusy] = useState(false);
 
   const pick = async (file?: File) => {
     if (!file) return;
@@ -106,33 +109,120 @@ export function MediaField({
     }
   };
 
+  // Paste a public Drive link → server copies the bytes to R2 (reel/video or image).
+  const importDrive = async () => {
+    const link = driveLink.trim();
+    if (!link) return;
+    setDriveBusy(true);
+    setErr("");
+    try {
+      const r = await fetch("/api/drive/copy-one", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: link }),
+      });
+      const d = (await r.json()) as { publicUrl?: string; error?: string };
+      if (!r.ok || !d.publicUrl) throw new Error(d.error ?? "Drive copy failed");
+      onChange(d.publicUrl);
+      setDriveLink("");
+      setDriveOpen(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Drive copy failed");
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
   return (
     <label className="db-field">
       <span className="db-label">{label}</span>
-      <div className="db-media">
-        {value &&
-          (kind === "image" ? (
-            <img className="db-thumb" src={value} alt="" loading="lazy" />
-          ) : (
-            <video className="db-thumb" src={value} muted />
-          ))}
-        <input className="db-input" type="text" value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder={`/images/… or R2 URL`} />
-        <button
-          type="button"
-          className="db-btn db-btn-sm"
-          disabled={busy}
-          onClick={() => fileRef.current?.click()}
-        >
-          {busy ? "Uploading…" : "Upload"}
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept={kind === "image" ? "image/*" : "video/mp4,video/quicktime"}
-          hidden
-          onChange={(e) => void pick(e.target.files?.[0])}
-        />
-      </div>
+      {kind === "video" ? (
+        <div className="db-media">
+          {value && <video className="db-thumb" src={value} muted />}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              type="button"
+              className="db-btn db-btn-sm"
+              disabled={busy}
+              onClick={() => fileRef.current?.click()}
+            >
+              {busy ? "Uploading…" : "Upload file"}
+            </button>
+            <button
+              type="button"
+              className="db-btn db-btn-sm"
+              disabled={driveBusy || busy}
+              onClick={() => setDriveOpen((o) => !o)}
+            >
+              {driveBusy ? "Copying…" : "Import from Drive"}
+            </button>
+            {value && (
+              <button
+                type="button"
+                className="db-mini db-mini-del"
+                onClick={() => onChange("")}
+                aria-label="Clear video"
+                title="Clear"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {driveOpen && (
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                className="db-input"
+                type="text"
+                value={driveLink}
+                onChange={(e) => setDriveLink(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void importDrive();
+                  }
+                }}
+                placeholder="Paste public Drive link (Anyone with the link → Viewer)"
+                aria-label="Google Drive link"
+              />
+              <button
+                type="button"
+                className="db-btn db-btn-sm"
+                disabled={driveBusy || !driveLink.trim()}
+                onClick={() => void importDrive()}
+              >
+                Copy to R2
+              </button>
+            </div>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="video/mp4,video/quicktime,video/webm"
+            hidden
+            onChange={(e) => void pick(e.target.files?.[0])}
+          />
+        </div>
+      ) : (
+        <div className="db-media">
+          {value && <img className="db-thumb" src={value} alt="" loading="lazy" />}
+          <input className="db-input" type="text" value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder={`/images/… or R2 URL`} />
+          <button
+            type="button"
+            className="db-btn db-btn-sm"
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            {busy ? "Uploading…" : "Upload"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => void pick(e.target.files?.[0])}
+          />
+        </div>
+      )}
       {err && <span className="db-err">{err}</span>}
     </label>
   );
