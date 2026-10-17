@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from "react";
 import { Arrow } from "@/components/Icons";
 
-export type Reel = { src: string; poster?: string; label: string; rotate?: boolean; spot?: string; x?: number; y?: number; w?: number; h?: number };
+export type Reel = { src: string; poster?: string; label: string; rotate?: number; spot?: string; x?: number; y?: number; w?: number; h?: number };
 
 type ReelPos = { x: number; y: number; w: number; h: number };
 type Corner = "nw" | "ne" | "sw" | "se";
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const CORNERS: Corner[] = ["nw", "ne", "sw", "se"];
+// Tile spin in degrees (0/90/180/270); legacy boolean true = 90.
+const degOf = (r?: { rotate?: number | boolean }) =>
+  typeof r?.rotate === "number" ? ((Math.round(r.rotate) % 360) + 360) % 360 : r?.rotate ? 90 : 0;
 
 // The curated 5-reel desktop art direction. Locks apply only when the full set is
 // present — any other count falls back to dense auto-flow (see globals.css).
@@ -33,6 +36,7 @@ export default function Reels({
   edit = false,
   onMove,
   onSnapshot,
+  onRotate,
   canvasH,
   canvasRatio,
 }: {
@@ -40,6 +44,7 @@ export default function Reels({
   edit?: boolean;
   onMove?: (i: number, pos: ReelPos) => void;
   onSnapshot?: (items: ({ i: number } & ReelPos)[], boxH: number, ratio: number) => void;
+  onRotate?: (i: number, rotate: number) => void;
   canvasH?: number;
   canvasRatio?: number;
 }) {
@@ -80,6 +85,9 @@ export default function Reels({
     dragged.current = false;
     e.preventDefault();
     e.stopPropagation();
+    // preventDefault above blocks click-to-focus — focus the reel explicitly
+    // so Shift+R (rotate) lands on the figure's keydown handler.
+    (e.currentTarget.closest(".reel") as HTMLElement | null)?.focus({ preventScroll: true });
   };
 
   const onDragMove = (e: RPointerEvent<HTMLElement>) => {
@@ -160,7 +168,14 @@ export default function Reels({
     if (reels[i]?.rotate) return;
     if (v.videoWidth > 0) {
       const isTall = v.videoHeight >= v.videoWidth;
-      setTall((t) => (t[i] === isTall ? t : t.map((x, j) => (j === i ? isTall : x))));
+      setTall((t) => {
+        if (t.length > i && t[i] === isTall) return t;
+        // `tall` may lag behind a newly added reel — grow it so the write lands
+        // and the value actually stabilizes (else setState fires every commit).
+        const n = t.length > i ? t.slice() : [...t, ...Array(i + 1 - t.length).fill(true)];
+        n[i] = isTall;
+        return n;
+      });
     }
   };
 
@@ -292,13 +307,29 @@ export default function Reels({
           // An empty src makes the browser re-download the page — skip broken entries.
           if (!r.src) return null;
           const pos = live && live.i === i ? live : r.x != null && r.y != null && r.w != null && r.h != null ? r : null;
+          // Tile spin in degrees.
+          const deg = degOf(r);
+          const tileStyle: CSSProperties | undefined =
+            pos || deg
+              ? {
+                  ...(pos ? { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` } : null),
+                  ...(deg ? { transform: `rotate(${deg}deg)`, zIndex: 2 } : null),
+                }
+              : undefined;
           return (
             <figure
               key={`${i}:${r.src}`}
-              className={`reel ${tall[i] ? "reel-v" : "reel-h"}${r.rotate ? " reel-rot" : ""}${r.spot ? ` ${r.spot}` : ""}${pos ? " reel-placed" : ""}`}
-              style={pos ? { left: `${pos.x}%`, top: `${pos.y}%`, width: `${pos.w}%`, height: `${pos.h}%` } : undefined}
+              className={`reel ${(tall[i] ?? true) ? "reel-v" : "reel-h"}${deg ? " reel-rot" : ""}${r.spot ? ` ${r.spot}` : ""}${pos ? " reel-placed" : ""}`}
+              style={tileStyle}
               onClick={() => onTap(i)}
               onKeyDown={(e) => {
+                // Arrange mode: Shift+R on a focused reel adds another 90° of spin.
+                if (edit && onRotate && e.shiftKey && (e.key === "r" || e.key === "R")) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onRotate(i, (deg + 90) % 360);
+                  return;
+                }
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   toggle(i);
@@ -310,7 +341,7 @@ export default function Reels({
               onPointerCancel={edit ? endDrag : undefined}
               tabIndex={0}
               role="button"
-              aria-label={edit ? `${r.label} reel ${i + 1} — drag to move` : `${r.label} reel ${i + 1} — tap for sound, double-tap for fullscreen`}
+              aria-label={edit ? `${r.label} reel ${i + 1}, rotated ${deg}° — drag to move, Shift+R to rotate 90° more` : `${r.label} reel ${i + 1} — tap for sound, double-tap for fullscreen`}
             >
               <video
                 ref={(el) => {
@@ -383,17 +414,24 @@ export default function Reels({
             role="button"
             aria-label={fullMuted ? "Unmute reel" : "Mute reel"}
           >
-            <video
-              key={reels[full].src}
-              src={reels[full].src}
-              poster={reels[full].poster}
-              muted={fullMuted}
-              loop
-              playsInline
-              autoPlay
-              preload="auto"
-              className={`lb-video${reels[full].rotate ? " lb-video-rot" : ""}`}
-            />
+          {(() => {
+            const fr = reels[full];
+            const fdeg = degOf(fr);
+            return (
+              <video
+                key={fr.src}
+                src={fr.src}
+                poster={fr.poster}
+                muted={fullMuted}
+                loop
+                playsInline
+                autoPlay
+                preload="auto"
+                className="lb-video"
+                style={fdeg ? { transform: `rotate(${fdeg}deg)` } : undefined}
+              />
+            );
+          })()}
             <span className={`reel-badge lb-vbadge ${!fullMuted ? "on" : ""}`} aria-hidden>
               {!fullMuted ? <SpeakerOn /> : <SpeakerOff />}
             </span>

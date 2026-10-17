@@ -78,6 +78,9 @@ export default function SiteRenderer({
     },
     []
   );
+  const rotateReel = useCallback((i: number, rotate: number) => {
+    window.parent.postMessage({ type: "pk-reel-rot", index: i, rotate }, window.location.origin);
+  }, []);
 
   useEffect(() => {
     fetch("/api/albums?category=wedding&nonempty=1")
@@ -273,6 +276,23 @@ export default function SiteRenderer({
           </h2>
         </section>
 
+        {/* Weddings — album gallery from Turso + R2 (placed right below the moral band) */}
+        <section className="v-dest" id="weddings">
+          <h2 className="v-big">{c.weddings.heading}</h2>
+          <p className="v-small">{c.weddings.sub}</p>
+          <div className="v-tease-scroll">
+            {albums.map((a) => (
+              <a key={a.slug} href={`/weddings/${a.slug}`} className="v-tease-card" data-reveal>
+                <div className="v-tease-img" style={a.cover ? { backgroundImage: `url("${a.cover}")` } : undefined} />
+                <h3 className="v-names">{a.title}</h3>
+              </a>
+            ))}
+          </div>
+          <a href="/weddings" className="v-underline-cta">View all weddings</a>
+          <br />
+          <a href="#films" className="v-underline-cta">Enter Pelli Kathalu Theater</a>
+        </section>
+
         {/* Experience */}
         <section className="v-exp">
           <h2 className="v-big" data-reveal>{c.experience.heading}</h2>
@@ -342,23 +362,6 @@ export default function SiteRenderer({
           </div>
         </section>
 
-        {/* Weddings — album gallery from Turso + R2 */}
-        <section className="v-dest" id="weddings">
-          <h2 className="v-big">{c.weddings.heading}</h2>
-          <p className="v-small">{c.weddings.sub}</p>
-          <div className="v-tease-scroll">
-            {albums.map((a) => (
-              <a key={a.slug} href={`/weddings/${a.slug}`} className="v-tease-card" data-reveal>
-                <div className="v-tease-img" style={a.cover ? { backgroundImage: `url("${a.cover}")` } : undefined} />
-                <h3 className="v-names">{a.title}</h3>
-              </a>
-            ))}
-          </div>
-          <a href="/weddings" className="v-underline-cta">View all weddings</a>
-          <br />
-          <a href="#films" className="v-underline-cta">Enter Pelli Kathalu Theater</a>
-        </section>
-
         {/* Theater */}
         <section className="v-theater" id="films">
           <div className="recent-head">
@@ -369,8 +372,8 @@ export default function SiteRenderer({
             <span className="cine-hint">{c.theater.cineHint}</span>
           </div>
           <div className={`theater-box${arrange ? " arranging" : ""}`}>
-            <Reels reels={c.theater.reels} edit={arrange} onMove={moveReel} onSnapshot={snapshotReels} canvasH={c.theater.canvasH} canvasRatio={c.theater.canvasRatio} />
-            {arrange && <p className="arrange-hint">Drag reels to move · corner handle to resize — releases autosave</p>}
+            <Reels reels={c.theater.reels} edit={arrange} onMove={moveReel} onSnapshot={snapshotReels} onRotate={rotateReel} canvasH={c.theater.canvasH} canvasRatio={c.theater.canvasRatio} />
+            {arrange && <p className="arrange-hint">Drag reels to move · corner handle to resize · click a reel and press Shift+R to rotate — releases autosave</p>}
           </div>
           <p className="v-hand">{c.theater.hand}</p>
         </section>

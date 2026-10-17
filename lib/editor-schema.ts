@@ -1,4 +1,4 @@
-export type FieldType = "text" | "textarea" | "image" | "video" | "list" | "stringList" | "palette";
+export type FieldType = "text" | "textarea" | "image" | "video" | "list" | "stringList" | "palette" | "toggle";
 
 export interface FieldDef {
   path: string; // dot path from content root, e.g. "hero.eyebrow" or "reviews"
@@ -211,6 +211,7 @@ export const editorSections: SectionDef[] = [
         itemFields: [
           { path: "src", label: "Video", type: "video" },
           { path: "label", label: "Label", type: "text" },
+          { path: "rotate", label: "Rotate", type: "toggle" },
         ],
         empty: () => ({ src: "", label: "Weddings", spot: "" }),
       },

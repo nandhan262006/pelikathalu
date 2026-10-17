@@ -82,6 +82,20 @@ export function TextField({
   );
 }
 
+function RotateButton({ deg, onStep }: { deg: number; onStep: (deg: number) => void }) {
+  const next = (deg + 90) % 360;
+  return (
+    <button
+      type="button"
+      className={`db-btn db-btn-sm${deg ? " db-btn-arrange-on" : ""}`}
+      onClick={() => onStep(next)}
+      title="Rotate the video 90° clockwise — click again for 180°, then 270°, then back to 0°"
+    >
+      {deg ? `⟳ ${deg}° — rotate to ${next}°` : "⟳ Rotate 90°"}
+    </button>
+  );
+}
+
 export function MediaField({
   label,
   value,
@@ -376,7 +390,20 @@ function ItemCard({
         </span>
       </div>
       {fields.map((f) =>
-        f.type === "stringList" ? (
+        f.type === "toggle" ? (
+          <div key={f.path} className="db-field-group">
+            <RotateButton
+              deg={
+                typeof item[f.path] === "number"
+                  ? ((Math.round(item[f.path] as number) % 360) + 360) % 360
+                  : item[f.path]
+                    ? 90
+                    : 0
+              }
+              onStep={(d) => onUpdate(f.path, d)}
+            />
+          </div>
+        ) : f.type === "stringList" ? (
           <StringListField
             key={f.path}
             def={f}

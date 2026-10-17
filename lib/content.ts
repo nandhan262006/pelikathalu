@@ -2,7 +2,7 @@ export type HeroSlide = { img: string; title: string; imgCrop?: string };
 export type LittleThing = { img: string; cap: string; imgCrop?: string };
 export type Chapter = { n: string; h: string; p: string; cta?: string };
 export type Review = { name: string; img: string; text: string[]; imgCrop?: string };
-export type Reel = { src: string; poster?: string; label: string; rotate?: boolean; spot?: string; x?: number; y?: number; w?: number; h?: number };
+export type Reel = { src: string; poster?: string; label: string; rotate?: number; spot?: string; x?: number; y?: number; w?: number; h?: number };
 export type Tease = { names: string; img: string; imgCrop?: string };
 
 export interface SiteContent {

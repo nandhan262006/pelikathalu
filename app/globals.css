@@ -524,17 +524,10 @@ section { box-sizing: border-box; }
 .reel-v { aspect-ratio: 9 / 16; max-height: 70vh; }
 .reel-h { aspect-ratio: 16 / 9; max-height: 50vh; }
 .reel video { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--pk-band); }
-/* Rotated reels: spun 90deg clockwise and scaled to fill the SAME tall 9:16 tile as the other reels (grid untouched) */
+/* Rotated reels: the whole TILE spins (transform comes inline as 0/90/180/270°);
+   the grid slot stays put, the tile visually turns over its neighbours. */
 .reel-rot { position: relative; }
-.reel-rot video {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 177.78%; /* = tile height, so after rotation it spans full height */
-  height: 56.25%; /* = tile width, so after rotation it spans full width */
-  transform: translate(-50%, -50%) rotate(90deg);
-  object-fit: cover;
-}
+.reel-rot video { object-fit: cover; }
 .reel-tag {
   position: absolute; left: calc(10 * var(--u)); bottom: calc(10 * var(--u));
   font-size: calc(13 * var(--u)); letter-spacing: 0.14em; text-transform: uppercase;
@@ -1096,7 +1089,7 @@ section { box-sizing: border-box; }
   background: #000;
   animation: lbIn 0.18s ease;
 }
-.lb-video-rot { transform: rotate(90deg); }
+.lb-video-rot { transform: rotate(90deg); } /* legacy — inline transform now drives rotation */
 .lb-img {
   max-width: min(92vw, 1200px);  max-height: 82vh;
   width: auto;

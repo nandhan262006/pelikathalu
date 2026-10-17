@@ -127,6 +127,7 @@ export default function Dashboard({ site }: { site: string }) {
         items?: { i: number; x: number; y: number; w: number; h: number }[];
         boxH?: number;
         ratio?: number;
+        rotate?: boolean;
       };
       if (d?.type === "pk-reel-pos" && d.index != null && d.x != null && d.y != null && d.w != null && d.h != null) {
         setContent((c) => {
@@ -138,6 +139,14 @@ export default function Dashboard({ site }: { site: string }) {
             w: d.w,
             h: d.h,
           });
+        });
+      }
+      if (d?.type === "pk-reel-rot" && d.index != null && typeof d.rotate === "number") {
+        setContent((c) => {
+          if (!c) return c;
+          const reel = getIn(c, `theater.reels.${d.index}`) as Record<string, unknown> | undefined;
+          if (!reel) return c;
+          return setIn(structuredClone(c), `theater.reels.${d.index}`, { ...reel, rotate: d.rotate });
         });
       }
       if (d?.type === "pk-reel-snap" && d.items?.length) {
