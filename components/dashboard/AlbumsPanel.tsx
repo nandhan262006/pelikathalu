@@ -726,8 +726,9 @@ export default function AlbumsPanel() {
   /**
    * Copy Drive files into R2 and attach them. Speed: 3 workers × 6-id chunks
    * run concurrently (≈9 files in flight; the server copies 4 per request).
-   * Each id gets one attempt per run; anything not imported stays listed, so
-   * clicking Copy again resumes — the server skips what's already there.
+   * Transient failures (Drive quota, timeouts, network) are retried once
+   * automatically; permanent ones (over-size, not shared, non-media) are
+   * surfaced by name instead of asking for a useless re-click.
    */
   const importDrive = async () => {
     if (!selected || !driveFiles.length || !!driveProgress) return;
@@ -735,8 +736,8 @@ export default function AlbumsPanel() {
     const BATCH = 6;
     const WORKERS = 3;
     const total = driveFiles.length;
-    const queue = driveFiles.map((f) => f.id);
     const remaining = new Set<string>();
+    const failReasons = new Map<string, string>(); // id → last error from the server
     let importedTotal = 0;
     let skippedTotal = 0;
     let doneCount = 0;
@@ -748,6 +749,13 @@ export default function AlbumsPanel() {
       failed?: { driveId: string; error: string }[];
       skipped?: string[];
       error?: string;
+    };
+
+    // Failures no amount of re-clicking can fix — say so instead of looping.
+    const PERMANENT_RE = /over 60MB|not an image|not found|not public|Anyone with the link|is a folder|could not parse|not configured|is .*, not an/i;
+    const isPermanent = (id: string) => {
+      const e = failReasons.get(id);
+      return e ? PERMANENT_RE.test(e) : false;
     };
 
     const runChunk = async (ids: string[]) => {
@@ -775,8 +783,9 @@ export default function AlbumsPanel() {
         importedTotal += d.imported?.length ?? 0;
         skippedTotal += d.skipped?.length ?? 0;
         for (const f of d.failed ?? []) {
+          failReasons.set(f.driveId, f.error);
           errors.push(`${nameOf(f.driveId)}: ${f.error}`);
-          remaining.add(f.driveId); // stay listed so Copy can be clicked again
+          remaining.add(f.driveId); // stay listed so the retry pass (or a re-click) can pick it up
         }
         if (!r.ok && !doneIds.size && !failedIds.size) {
           ids.forEach((id) => remaining.add(id));
@@ -800,26 +809,47 @@ export default function AlbumsPanel() {
       }
     };
 
-    const worker = async () => {
-      while (queue.length) await runChunk(queue.splice(0, BATCH));
+    const runPass = async (ids: string[]) => {
+      const queue = ids.slice();
+      const worker = async () => {
+        while (queue.length) await runChunk(queue.splice(0, BATCH));
+      };
+      await Promise.all(Array.from({ length: WORKERS }, () => worker()));
     };
-    await Promise.all(Array.from({ length: WORKERS }, () => worker()));
+
+    await runPass(driveFiles.map((f) => f.id));
+
+    // One automatic retry for transient failures (Drive quota / timeouts /
+    // network) — the classic "1-2 stragglers" case. Permanent failures skip it.
+    const transientIds = [...remaining].filter((id) => !isPermanent(id));
+    if (transientIds.length) {
+      flash(`Retrying ${transientIds.length} failed file${transientIds.length > 1 ? "s" : ""}…`);
+      for (const id of transientIds) remaining.delete(id);
+      await new Promise((r) => setTimeout(r, 1200)); // let Drive quota breathe
+      await runPass(transientIds);
+    }
 
     setDriveProgress(null);
     if (!remaining.size) {
       flash(
         `Stored ${importedTotal} permanent R2 cop${importedTotal === 1 ? "y" : "ies"}` +
           (skippedTotal ? `, ${skippedTotal} already in the gallery` : "") +
-          (errors.length ? `, ${errors.length} failed: ${errors[errors.length - 1].slice(0, 110)}` : "") +
           " ✓"
       );
       clearDrive();
       await openAlbum(selected); // one refetch swaps temp grid rows for real ids
       await refresh();
     } else {
+      const blocked = [...remaining].filter(isPermanent);
+      const retryable = remaining.size - blocked.length;
+      const names = blocked.slice(0, 3).map((id) => `${nameOf(id)} (${(failReasons.get(id) ?? "").slice(0, 60)})`);
       flash(
-        `Paused with ${remaining.size} left — click Copy again to resume` +
-          (errors.length ? `: ${errors[errors.length - 1].slice(0, 130)}` : "")
+        (blocked.length
+          ? `Can't import ${blocked.length} file${blocked.length > 1 ? "s" : ""}: ${names.join("; ")}${blocked.length > 3 ? "…" : ""}`
+          : retryable
+            ? `Still ${retryable} left — click Copy again to resume`
+            : "Nothing imported — check Drive sharing") +
+          (errors.length ? ` — last error: ${errors[errors.length - 1].slice(0, 100)}` : "")
       );
       await refresh();
     }
