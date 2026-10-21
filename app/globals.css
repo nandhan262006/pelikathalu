@@ -1622,6 +1622,28 @@ section { box-sizing: border-box; }
   .v-moral-line { font-size: 44px; line-height: 1.35; max-width: 900px; margin-left: auto; margin-right: auto; }
 }
 
+/* ---------- Build Your Own Quotation band ---------- */
+.v-quote {
+  padding: calc(84 * var(--u)) calc(28 * var(--u));
+  background: var(--paper-warm);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+}
+.v-quote-script { font-size: calc(32 * var(--u)); color: var(--accent); }
+.v-quote .v-big { margin-top: calc(6 * var(--u)); }
+.v-quote-copy {
+  max-width: calc(640 * var(--u));
+  margin: calc(18 * var(--u)) auto 0;
+}
+.v-quote .hero-ctas { margin-top: calc(26 * var(--u)); display: flex; justify-content: center; }
+.v-quote .v-hand { margin-top: calc(18 * var(--u)); color: var(--muted); }
+@media (min-width: 900px) {
+  .v-quote { padding: 110px 48px; }
+  .v-quote-script { font-size: 40px; }
+  .v-quote-copy { font-size: 17px; line-height: 1.8; max-width: 760px; }
+}
+
 /* ---------- Portraits & personalities band ---------- */
 .v-portraits {
   position: relative;

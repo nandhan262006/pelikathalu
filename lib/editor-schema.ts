@@ -140,6 +140,19 @@ export const editorSections: SectionDef[] = [
     ],
   },
   {
+    id: "quote",
+    title: "Build Your Own Quotation",
+    fields: [
+      { path: "quote.script", label: "Script", type: "text" },
+      { path: "quote.headingLine1", label: "Heading line 1", type: "text" },
+      { path: "quote.headingLine2", label: "Heading line 2", type: "text" },
+      { path: "quote.copy", label: "Copy", type: "textarea" },
+      { path: "quote.cta", label: "CTA text", type: "text" },
+      { path: "quote.url", label: "Builder URL", type: "text" },
+      { path: "quote.note", label: "Handwritten note", type: "text" },
+    ],
+  },
+  {
     id: "experience",
     title: "Experience",
     fields: [

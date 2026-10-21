@@ -46,6 +46,15 @@ export interface SiteContent {
     hand: string;
   };
   moral: { script: string; line1: string; line2Em: string };
+  quote: {
+    script: string;
+    headingLine1: string;
+    headingLine2: string;
+    copy: string;
+    cta: string;
+    url: string;
+    note: string;
+  };
   experience: { heading: string; copy: string; cta: string };
   romance: { cta: string; hand: string; grid: string[] };
   documentary: { banner: string; cta: string; grid: string[] };
@@ -188,6 +197,15 @@ export const defaultContent: SiteContent = {
     script: "Pelli Kathalu",
     line1: "means more than capturing a moment.",
     line2Em: "It means preserving the story behind it.",
+  },
+  quote: {
+    script: "build your own quotation",
+    headingLine1: "Every wedding is different.",
+    headingLine2: "So is every quote.",
+    copy: "Tell us what you're planning — the events, the days, the extras that matter to you — and build a quotation that fits your story before we even meet.",
+    cta: "Build Now",
+    url: "https://quotation.pellikathalu.co",
+    note: "no price lists dumped on you — only what you actually choose",
   },
   experience: {
     heading: "The Pellikathalu Way",

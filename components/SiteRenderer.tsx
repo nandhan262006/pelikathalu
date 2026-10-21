@@ -15,6 +15,7 @@ const MENU_HREFS: Record<string, string> = {
   "The Little Things": "#little-things",
   "Modern Romance": "#romance",
   Documentary: "#documentary",
+  "Build Your Own Quotation": "#quote",
   Portraits: "/portraits",
   Weddings: "/weddings",
   Gallery: "/portfolio",
@@ -323,6 +324,25 @@ export default function SiteRenderer({
             {c.experience.copy}
           </p>
           <a href="#work" className="v-underline-cta">{c.experience.cta}</a>
+        </section>
+
+        {/* Build Your Own Quotation */}
+        <section className="v-quote" id="quote">
+          <p className="script v-quote-script" data-reveal>{c.quote.script}</p>
+          <h2 className="v-big" data-reveal style={{ transitionDelay: "80ms" }}>
+            {c.quote.headingLine1}
+            <br />
+            {c.quote.headingLine2}
+          </h2>
+          <p className="v-copy v-quote-copy" data-reveal style={{ transitionDelay: "160ms" }}>
+            {c.quote.copy}
+          </p>
+          <div className="hero-ctas" data-reveal style={{ transitionDelay: "240ms" }}>
+            <a href={c.quote.url} target="_blank" rel="noreferrer" className="pill hero-btn">
+              {c.quote.cta} <Arrow className="pill-arrow" />
+            </a>
+          </div>
+          <p className="v-hand" data-reveal style={{ transitionDelay: "320ms" }}>{c.quote.note}</p>
         </section>
 
         {/* Modern Romance */}
