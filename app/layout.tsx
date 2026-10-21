@@ -69,6 +69,17 @@ export const metadata: Metadata = {
     "Prem and Pavan photography",
   ],
   alternates: { canonical: "/" },
+  icons: {
+    icon: [
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icon-512.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  // Set NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION in production to verify via meta tag.
+  ...(process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+    ? { verification: { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION } }
+    : {}),
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
